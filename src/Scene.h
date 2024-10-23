@@ -157,7 +157,17 @@ public:
             // Pour chaque lumière dans la scène
             for (const auto &light: lights) {
                 Vec3 lightDir = light.pos - intersectionPoint;
+                float lightDistance = lightDir.length();
                 lightDir.normalize();
+
+                // On lance un rayon vers la lumière pour vérifier si le point est dans l'ombre
+                Ray shadowRay(intersectionPoint + normal * 0.001f, lightDir); // Décalage pour éviter l'auto-intersection
+                RaySceneIntersection shadowIntersection = computeIntersection(shadowRay, 0.001f);
+
+                // Si le point est dans l'ombre, on passe à la lumière suivante
+                if (shadowIntersection.intersectionExists && shadowIntersection.t < lightDistance) {
+                    continue; // Le point est dans l'ombre, passer à la lumière suivante
+                }
 
                 Vec3 viewDir = -ray.direction();
                 viewDir.normalize();
