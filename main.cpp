@@ -23,6 +23,9 @@
 #include <cstdlib>
 
 #include <algorithm>
+#include <iomanip>
+#include <filesystem>
+
 #include "src/Vec3.h"
 #include "src/Camera.h"
 #include "src/Scene.h"
@@ -168,7 +171,7 @@ void idle () {
 
 void ray_trace_from_camera() {
     int w = glutGet(GLUT_WINDOW_WIDTH)  ,   h = glutGet(GLUT_WINDOW_HEIGHT);
-    std::cout << "Ray tracing a " << w << " x " << h << " image" << std::endl;
+    std::cout << "Ray tracing a " << w << " x " << h << " image..." << std::endl;
     camera.apply();
     Vec3 pos , dir;
     //    unsigned int nsamples = 100;
@@ -187,18 +190,32 @@ void ray_trace_from_camera() {
             image[x + y*w] /= nsamples;
         }
     }
-    std::cout << "\tDone" << std::endl;
+    std::cout << "Ray tracing done, exporting image..." << std::endl;
 
-    std::string filename = "./rendu.ppm";
-    ofstream f(filename.c_str(), ios::binary);
+    // Get current time
+    auto t = std::time(nullptr);
+    auto tm = *std::localtime(&t);
+
+    // Format time to string
+    std::ostringstream oss;
+    oss << std::put_time(&tm, "%Y-%m-%d_%H-%M-%S");
+    std::string time_str = oss.str();
+
+    // Create the directory if it does not exist
+    std::filesystem::create_directories("rendus");
+
+    // Create filename with date and time
+    std::string filename = "rendus/rendu_" + time_str + ".ppm";
+    std::ofstream f(filename.c_str(), std::ios::binary);
     if (f.fail()) {
-        cout << "Could not open file: " << filename << endl;
+        std::cout << "Could not open file: " << filename << std::endl;
         return;
     }
     f << "P3" << std::endl << w << " " << h << std::endl << 255 << std::endl;
-    for (int i=0; i<w*h; i++)
-        f << (int)(255.f*std::min<float>(1.f,image[i][0])) << " " << (int)(255.f*std::min<float>(1.f,image[i][1])) << " " << (int)(255.f*std::min<float>(1.f,image[i][2])) << " ";
+    for (int i = 0; i < w * h; i++)
+        f << (int)(255.f * std::min<float>(1.f, image[i][0])) << " " << (int)(255.f * std::min<float>(1.f, image[i][1])) << " " << (int)(255.f * std::min<float>(1.f, image[i][2])) << " ";
     f << std::endl;
+    std::cout << "Image exported to " << filename << std::endl;
     f.close();
 }
 

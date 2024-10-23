@@ -1,0 +1,40 @@
+# Ignore build directories
+/build/
+/bin/
+/obj/
+
+# Ignore executables
+*.exe
+*.out
+*.app
+
+# Ignore object files
+*.o
+*.obj
+*.lo
+*.a
+*.lib
+*.dll
+*.dylib
+*.so
+
+# Ignore debug files
+*.gch
+*.pch
+*.dSYM/
+*.ipch/
+*.pdb
+*.ilk
+*.log
+
+# Ignore IDE specific files
+/.idea/
+/.vscode/
+/*.code-workspace
+
+# Ignore OS generated files
+.DS_Store
+Thumbs.db
+
+# Ignore rendered images
+/rendus/
