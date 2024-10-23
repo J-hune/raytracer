@@ -42,7 +42,8 @@ struct RaySceneIntersection {
     RaySphereIntersection raySphereIntersection;
     RaySquareIntersection raySquareIntersection;
 
-    RaySceneIntersection() : intersectionExists(false), t(FLT_MAX), rayMeshIntersection(), raySquareIntersection() {}
+    RaySceneIntersection() : intersectionExists(false), t(FLT_MAX), rayMeshIntersection(), raySquareIntersection() {
+    }
 };
 
 
@@ -134,8 +135,9 @@ public:
     Vec3 rayTraceRecursive(const Ray &ray, int NRemainingBounces, const float z_near) {
         Vec3 color(0.0, 0.0, 0.0);
         const Vec3 ambientLight(0.1, 0.1, 0.1); // Lumière ambiante
+        const float epsilon = 1e-5f; // Pour éviter les auto-intersections
 
-        // On calcule l'intersection avec la scène
+        // Calcul de l'intersection avec la scène
         const RaySceneIntersection intersection = computeIntersection(ray, z_near);
 
         if (intersection.intersectionExists) {
@@ -143,22 +145,16 @@ public:
             Vec3 normal;
             Material material;
 
-            // Si l'objet intersecté est une sphère
+            // On détermine l'objet intersecté (sphère, carré, mesh).
             if (intersection.typeOfIntersectedObject == 0) {
                 intersectionPoint = intersection.raySphereIntersection.intersection;
                 normal = intersection.raySphereIntersection.normal;
                 material = spheres[intersection.objectIndex].material;
-            }
-
-            // Si l'objet intersecté est un carré
-            else if (intersection.typeOfIntersectedObject == 1) {
+            } else if (intersection.typeOfIntersectedObject == 1) {
                 intersectionPoint = intersection.raySquareIntersection.intersection;
                 normal = intersection.raySquareIntersection.normal;
                 material = squares[intersection.objectIndex].material;
-            }
-
-            // L'objet intersecté est donc un mesh
-            else {
+            } else {
                 intersectionPoint = intersection.rayMeshIntersection.intersection;
                 normal = intersection.rayMeshIntersection.normal;
                 material = meshes[intersection.objectIndex].material;
@@ -166,6 +162,10 @@ public:
 
             // Composante ambiante
             color += Vec3::compProduct(material.ambient_material, ambientLight);
+
+            // Pré-normalisation du vecteur de vue
+            Vec3 viewDir = -ray.direction();
+            viewDir.normalize();
 
             // Pour chaque lumière dans la scène
             for (const auto &light: lights) {
@@ -175,24 +175,21 @@ public:
 
                 // Si la lumière est de type sphérique
                 if (light.type == LightType_Spherical) {
-                    // On lance un rayon vers la lumière pour vérifier si le point est dans l'ombre
-                    Ray shadowRay(intersectionPoint + normal * 0.001f, lightDir); // Décalage pour éviter l'auto-intersection
-                    RaySceneIntersection shadowIntersection = computeIntersection(shadowRay, 0.001f);
+                    // Vérification des ombres
+                    Ray shadowRay(intersectionPoint + normal * epsilon, lightDir);
+                    RaySceneIntersection shadowIntersection = computeIntersection(shadowRay, epsilon);
 
-                    // Si le point est dans l'ombre, on passe à la lumière suivante
                     if (shadowIntersection.intersectionExists && shadowIntersection.t < lightDistance) {
-                        continue; // Le point est dans l'ombre, passer à la lumière suivante
+                        continue; // Le point est dans l'ombre.
                     }
 
-                    Vec3 viewDir = -ray.direction();
-                    viewDir.normalize();
                     Vec3 reflectDir = reflect(-lightDir, normal);
 
                     // Composante diffuse
                     float diff = std::max(Vec3::dot(normal, lightDir), 0.0f);
                     Vec3 diffuse = Vec3::compProduct(material.diffuse_material, light.material) * diff;
 
-                    // Composante spéculaire
+                    // Composante spéculaire (approximation si besoin)
                     const float spec = std::pow(std::max(Vec3::dot(viewDir, reflectDir), 0.0f), material.shininess);
                     Vec3 specular = Vec3::compProduct(material.specular_material, light.material) * spec;
 
@@ -204,40 +201,37 @@ public:
                 else if (light.type == LightType_Quad) {
                     const int numSamples = 16; // Nombre d'échantillons pour les ombres douces
                     float shadowFactor = 0.0f;
+                    const float threshold = 0.8f * numSamples; // Early exit
 
+                    // Échantillonnage pour les ombres douces
                     for (int i = 0; i < numSamples; ++i) {
                         Vec3 samplePoint = samplePointOnQuad(light);
                         Vec3 shadowDir = samplePoint - intersectionPoint;
                         float shadowDistance = shadowDir.length();
                         shadowDir.normalize();
 
-                        // On lance un rayon vers l'échantillon de la lumière pour vérifier si le point est dans l'ombre
-                        Ray shadowRay(intersectionPoint + normal * 0.001f, shadowDir);
+                        // Rayon pour tester l'ombre
+                        Ray shadowRay(intersectionPoint + normal * epsilon, shadowDir);
+                        RaySceneIntersection shadowIntersection = computeIntersection(shadowRay, epsilon);
 
-                        // Décalage pour éviter l'auto-intersection
-                        RaySceneIntersection shadowIntersection = computeIntersection(shadowRay, 0.001f);
-
-                        // Si le point est dans l'ombre, on incrémente le facteur d'ombre
                         if (shadowIntersection.intersectionExists && shadowIntersection.t < shadowDistance) {
                             shadowFactor += 1.0f;
+                            if (shadowFactor >= threshold) break; // Sortie anticipée si trop d'ombre
                         }
                     }
 
-                    // On calcule la visibilité de la lumière en fonction du facteur d'ombre
                     float lightVisibility = 1.0f - shadowFactor / numSamples;
                     if (lightVisibility > 0.0f) {
-                        // On calcule la lumière diffuse et spéculaire comme précédemment, mais on multiplie par la visibilité
-                        Vec3 viewDir = -ray.direction();
-                        viewDir.normalize();
-                        Vec3 reflectDir = reflect(-lightDir, normal);
-
                         // Composante diffuse
                         float diff = std::max(Vec3::dot(normal, lightDir), 0.0f);
-                        Vec3 diffuse = Vec3::compProduct(material.diffuse_material, light.material) * diff * lightVisibility;
+                        Vec3 diffuse = Vec3::compProduct(material.diffuse_material, light.material) * diff *
+                                       lightVisibility;
 
                         // Composante spéculaire
+                        Vec3 reflectDir = reflect(-lightDir, normal);
                         const float spec = std::pow(std::max(Vec3::dot(viewDir, reflectDir), 0.0f), material.shininess);
-                        Vec3 specular = Vec3::compProduct(material.specular_material, light.material) * spec * lightVisibility;
+                        Vec3 specular = Vec3::compProduct(material.specular_material, light.material) * spec *
+                                        lightVisibility;
 
                         // Ajout des composantes diffuse et spéculaire à la couleur
                         color += diffuse + specular;
@@ -247,8 +241,10 @@ public:
         } else {
             color += Vec3(1.0, 1.0, 1.0); // Couleur de fond
         }
+
         return color;
     }
+
 
     Vec3 rayTrace(Ray const &rayStart) {
         // On appelle la fonction récursive avec l'unique rayon et 1 rebond
