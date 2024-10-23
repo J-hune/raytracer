@@ -118,8 +118,7 @@ public:
         } else if (t2 > 0) {
             intersection.t = t2;
         } else {
-            // On est censé ne pas arriver ici ! (si on arrive ici, je suis un margoulin)
-            std::cout << "C'est pas normal d'arriver ici !" << std::endl;
+            // Si les deux solutions sont négatives, il n'y a pas d'intersection (finalement, je ne suis pas un margoulin)
             intersection.intersectionExists = false;
             return intersection;
         }
