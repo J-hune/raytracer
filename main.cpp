@@ -177,7 +177,11 @@ void ray_trace_from_camera() {
     unsigned int nsamples = 50;
     std::vector<Vec3> image(w * h, Vec3(0, 0, 0));
 
+    // On récupère le temps actuel
+    auto start = std::chrono::high_resolution_clock::now();
+
     // For each pixel in the image, we cast a ray and accumulate the color
+    //#pragma omp parallel for
     for (int y = 0; y < h; y++) {
         for (int x = 0; x < w; x++) {
             for (unsigned int s = 0; s < nsamples; ++s) {
@@ -191,7 +195,10 @@ void ray_trace_from_camera() {
             image[x + y * w] /= static_cast<float>(nsamples);
         }
     }
-    std::cout << "Ray tracing done, exporting image..." << std::endl;
+
+    // On calcule le temps écoulé en secondes
+    auto duration = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::high_resolution_clock::now() - start);
+    std::cout << "Ray tracing réalisé en " << duration.count() << " secondes avec " << nsamples << " samples par pixel." << std::endl;
 
     // Get current time
     auto t = std::time(nullptr);
@@ -219,7 +226,7 @@ void ray_trace_from_camera() {
           << static_cast<int>(255.f * std::min(1.f, image[i][2])) << " ";
     }
     f << std::endl;
-    std::cout << "Image exported to " << filename << std::endl;
+    std::cout << "Image exportée dans " << filename << std::endl;
     f.close();
 }
 
