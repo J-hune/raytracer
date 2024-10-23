@@ -56,32 +56,55 @@ public:
         triangles[1][0] = 0;
         triangles[1][1] = 2;
         triangles[1][2] = 3;
-
-
     }
 
     RaySquareIntersection intersect(const Ray &ray) const {
-      RaySquareIntersection intersection;
-/*
-        // Equation du plan x . n - D = 0, ||n|| = 1
-        // Distance du plan au centre (0,0,0) : D = a . n
-        // (o + td) . n - D = 0
-        // t = D - o.n / d.n
-        float dDotN = Vec3::dot(ray.direction, m_normal);
-        if (dDotN == 0) {
-            intersection.intersectionExists = false;
-            return intersection;
+        RaySquareIntersection intersection;
+        intersection.intersectionExists = false;
+
+        // Récupération des données du carré
+        Vec3 m_bottom_left = vertices[0].position;
+        Vec3 m_right_vector = vertices[1].position - vertices[0].position;
+        Vec3 m_up_vector = vertices[3].position - vertices[0].position;
+        Vec3 m_normal = Vec3::cross(m_right_vector, m_up_vector);
+        m_normal.normalize();
+
+        // Calcul de l'intersection avec le plan du carré (si le rayon est parallèle, il n'y a pas d'intersection)
+        float denominator = Vec3::dot(m_normal, ray.direction());
+        float numerator = Vec3::dot(m_bottom_left - ray.origin(), m_normal);
+
+        if (std::fabs(denominator) < 1e-6) {
+            return intersection; // Pas d'intersection car le rayon est parallèle au plan
         }
 
-        float D = Vec3::dot(m_bottom_left, m_normal);
-        float t = (D - Vec3::dot(ray.origin, m_normal)) / dDotN;
+        // Calcul de la distance t pour laquelle le rayon intersecte le plan du carré
+        float t = numerator / denominator;
 
+        // Si t < 0, l'intersection est derrière l'origine du rayon
         if (t < 0) {
-            intersection.intersectionExists = false;
-            return intersection;
+            return intersection; // Pas d'intersection
         }
 
-*/
+        // Calculer le point d'intersection avec le plan
+        const Vec3 PointIntersection = ray.origin() + t * ray.direction();
+
+        // Transformer P dans l'espace local du carré
+        const Vec3 localP = PointIntersection - m_bottom_left;
+
+        // Calculer les projections sur les axes droit (right_vector) et haut (up_vector)
+        const float u = Vec3::dot(localP, m_right_vector) / m_right_vector.squareLength();
+        const float v = Vec3::dot(localP, m_up_vector) / m_up_vector.squareLength();
+
+        // Vérifier si l'intersection est à l'intérieur des limites du carré (u, v doivent être entre 0 et 1)
+        if (u >= 0 && u <= 1 && v >= 0 && v <= 1) {
+            intersection.intersectionExists = true;
+            intersection.t = t;
+            intersection.u = u;
+            intersection.v = v;
+            intersection.intersection = PointIntersection;
+            intersection.normal = m_normal;  // Normale du plan
+        }
+
         return intersection;
     }
 };
