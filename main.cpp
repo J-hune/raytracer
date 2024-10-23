@@ -1,19 +1,16 @@
 // -------------------------------------------
-// gMini : a minimal OpenGL/GLUT application
+// gMini: A minimal OpenGL/GLUT application
 // for 3D graphics.
 // Copyright (C) 2006-2008 Tamy Boubekeur
 // All rights reserved.
 // -------------------------------------------
 
 // -------------------------------------------
-// Disclaimer: this code is dirty in the
-// meaning that there is no attention paid to
-// proper class attribute access, memory
-// management or optimisation of any kind. It
-// is designed for quick-and-dirty testing
-// purpose.
+// Disclaimer: This code is not optimized and does not follow
+// best practices for class attribute access, memory
+// management, or optimization. It is designed for quick-and-dirty
+// testing purposes.
 // -------------------------------------------
-
 
 #include <iostream>
 #include <fstream>
@@ -21,10 +18,13 @@
 #include <string>
 #include <cstdio>
 #include <cstdlib>
+#include <thread>
+#include <mutex>
 
 #include <algorithm>
 #include <iomanip>
 #include <filesystem>
+#include <random>
 
 #include "src/Vec3.h"
 #include "src/Camera.h"
@@ -57,29 +57,32 @@ unsigned int selected_scene;
 
 std::vector<std::pair<Vec3, Vec3>> rays;
 
+// Print the usage information for the application.
 void printUsage() {
     cerr << endl
-            << "gMini: a minimal OpenGL/GLUT application for 3D graphics." << endl
-            << "Author : Tamy Boubekeur (https://www.labri.fr/~boubek)" << endl << endl
-            << "Usage : ./gmini [<file.off>]" << endl
+            << "gMini: A minimal OpenGL/GLUT application for 3D graphics." << endl
+            << "Author: Tamy Boubekeur (https://www.labri.fr/~boubek)" << endl << endl
+            << "Usage: ./gmini [<file.off>]" << endl
             << "Keyboard commands" << endl
             << "------------------" << endl
             << " ?: Print help" << endl
             << " w: Toggle Wireframe Mode" << endl
             << " g: Toggle Gouraud Shading Mode" << endl
             << " f: Toggle full screen mode" << endl
-            << " <drag>+<left button>: rotate model" << endl
-            << " <drag>+<right button>: move model" << endl
-            << " <drag>+<middle button>: zoom" << endl
+            << " <drag>+<left button>: Rotate model" << endl
+            << " <drag>+<right button>: Move model" << endl
+            << " <drag>+<middle button>: Zoom" << endl
             << " q, <esc>: Quit" << endl << endl;
 }
 
+// Display usage information and exit.
 void usage() {
     printUsage();
     exit(EXIT_FAILURE);
 }
 
-
+// ------------------------------------
+// Initialize the lighting settings.
 // ------------------------------------
 void initLight() {
     constexpr GLfloat light_position[4] = {0.0, 1.5, 0.0, 1.0};
@@ -94,45 +97,39 @@ void initLight() {
     glEnable(GL_LIGHTING);
 }
 
+// Initialize the OpenGL context and settings.
 void init() {
     camera.resize(SCREENWIDTH, SCREENHEIGHT);
     initLight();
-    //glCullFace (GL_BACK);
+    // glCullFace(GL_BACK); // Uncomment if back face culling is needed.
     glDisable(GL_CULL_FACE);
     glDepthFunc(GL_LESS);
     glEnable(GL_DEPTH_TEST);
     glClearColor(0.2f, 0.2f, 0.3f, 1.0f);
 }
 
-
 // ------------------------------------
-// Replace the code of these
-// functions for cleaning memory,
-// closing sockets, etc.
+// Cleanup function for freeing resources.
 // ------------------------------------
-
 void clear() {
+    // Implement cleanup code here if necessary.
 }
 
 // ------------------------------------
-// Replace the code of these
-// functions for alternative rendering.
+// Render the scene.
 // ------------------------------------
-
-
 void draw() {
     glEnable(GL_LIGHTING);
     scenes[selected_scene].draw();
 
-    // draw rays : (for debug)
-    //  std::cout << rays.size() << std::endl;
+    // Draw rays for debugging
     glDisable(GL_LIGHTING);
     glDisable(GL_TEXTURE_2D);
     glLineWidth(6);
     glColor3f(1, 0, 0);
     glBegin(GL_LINES);
 
-    // draw rays
+    // Draw rays
     for (unsigned int r = 0; r < rays.size(); ++r) {
         glVertex3f(rays[r].first[0], rays[r].first[1], rays[r].first[2]);
         glVertex3f(rays[r].second[0], rays[r].second[1], rays[r].second[2]);
@@ -140,6 +137,7 @@ void draw() {
     glEnd();
 }
 
+// Display callback function.
 void display() {
     glLoadIdentity();
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -149,6 +147,7 @@ void display() {
     glutSwapBuffers();
 }
 
+// Idle callback function to update the frame rate.
 void idle() {
     static int lastTime = glutGet(GLUT_ELAPSED_TIME);
     static unsigned int counter = 0;
@@ -167,73 +166,98 @@ void idle() {
     glutPostRedisplay();
 }
 
-
-void ray_trace_from_camera() {
-    int w = glutGet(GLUT_WINDOW_WIDTH), h = glutGet(GLUT_WINDOW_HEIGHT);
-    std::cout << "Ray tracing a " << w << " x " << h << " image..." << std::endl;
-    camera.apply();
+// Ray tracing function for a specific section of the image.
+void ray_trace_section(const int startY, const int endY, const int w, const int h, const unsigned int nsamples,
+                       std::vector<Vec3> &image, std::mt19937 &rng, std::uniform_real_distribution<float> &dist) {
     Vec3 pos, dir;
-    //    unsigned int samples = 100;
-    unsigned int nsamples = 50;
-    std::vector<Vec3> image(w * h, Vec3(0, 0, 0));
 
-    // On récupère le temps actuel
-    auto start = std::chrono::high_resolution_clock::now();
+    // Print the launch of ray tracing and thread ID
+    std::ostringstream oss;
+    oss << std::this_thread::get_id();
+    printf("Ray tracing section from %d to %d by thread %s\n", startY, endY, oss.str().c_str());
 
-    // For each pixel in the image, we cast a ray and accumulate the color
-    //#pragma omp parallel for
-    for (int y = 0; y < h; y++) {
+    // Ray tracing for the specified section
+    for (int y = startY; y < endY; y++) {
         for (int x = 0; x < w; x++) {
             for (unsigned int s = 0; s < nsamples; ++s) {
-                float u = (static_cast<float>(x) + static_cast<float>(rand()) / static_cast<float>(RAND_MAX)) / static_cast<float>(w);
-                float v = (static_cast<float>(y) + static_cast<float>(rand()) / static_cast<float>(RAND_MAX)) / static_cast<float>(h);
-                // this is a random uv that belongs to the pixel xy.
+                const float u = (static_cast<float>(x) + dist(rng)) / static_cast<float>(w);
+                const float v = (static_cast<float>(y) + dist(rng)) / static_cast<float>(h);
+
                 screen_space_to_world_space_ray(u, v, pos, dir);
-                Vec3 color = scenes[selected_scene].rayTrace(Ray(pos, dir));
+                const Vec3 color = scenes[selected_scene].rayTrace(Ray(pos, dir), rng);
                 image[x + y * w] += color;
             }
             image[x + y * w] /= static_cast<float>(nsamples);
         }
     }
+}
 
-    // On calcule le temps écoulé en secondes
-    auto duration = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::high_resolution_clock::now() - start);
-    std::cout << "Ray tracing réalisé en " << duration.count() << " secondes avec " << nsamples << " samples par pixel." << std::endl;
+// Main ray tracing function from the camera perspective.
+void ray_trace_from_camera() {
+    int w = glutGet(GLUT_WINDOW_WIDTH), h = glutGet(GLUT_WINDOW_HEIGHT);
+    camera.apply();
+    unsigned int nsamples = 100;
+    std::vector<Vec3> image(w * h, Vec3(0, 0, 0));
 
-    // Get current time
+    auto start = std::chrono::high_resolution_clock::now();
+    initializeMatrices();
+
+    // Random number generator for anti-aliasing
+    std::mt19937 rng(std::random_device{}());
+    std::uniform_real_distribution<float> dist(0.0f, 1.0f);
+
+    // Number of threads to use
+    unsigned int numThreads = std::thread::hardware_concurrency();
+    std::vector<std::thread> threads;
+    int sectionHeight = h / static_cast<int>(numThreads);
+    std::cout << "Ray tracing image of size " << w << "x" << h << " with " << numThreads << " threads and " << nsamples << " samples per pixel" << std::endl;
+
+    // Launch threads for ray tracing
+    for (unsigned int i = 0; i < numThreads; ++i) {
+        int startY = static_cast<int>(i) * sectionHeight;
+        int endY = (i == numThreads - 1) ? h : startY + sectionHeight;
+        threads.emplace_back(ray_trace_section, startY, endY, w, h, nsamples, std::ref(image), std::ref(rng), std::ref(dist));
+    }
+
+    // Wait for all threads to finish
+    for (auto &thread: threads) {
+        thread.join();
+    }
+
+    // Calculate elapsed time in seconds
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - start);
+    std::cout << "Ray tracing completed in " << static_cast<float>(duration.count()) / 1000.f << " seconds" << std::endl;
+
+    // Export the image after ray tracing
+    std::ostringstream oss;
     auto t = std::time(nullptr);
     auto tm = *std::localtime(&t);
-
-    // Format time to string
-    std::ostringstream oss;
     oss << std::put_time(&tm, "%Y-%m-%d_%H-%M-%S");
     std::string time_str = oss.str();
 
-    // Create the directory if it does not exist
     std::filesystem::create_directories("rendus");
-
-    // Create filename with date and time
     std::string filename = "rendus/rendu_" + time_str + ".ppm";
-    std::ofstream f(filename.c_str(), std::ios::binary);
-    if (f.fail()) {
-        std::cout << "Could not open file: " << filename << std::endl;
+
+    std::ofstream f(filename, std::ios::binary);
+    if (!f) {
+        std::cout << "Impossible d'ouvrir le fichier : " << filename << std::endl;
         return;
     }
+
     f << "P3\n" << w << " " << h << "\n255\n";
-    for (int i = 0; i < w * h; i++) {
-        f << static_cast<int>(255.f * std::min(1.f, image[i][0])) << " "
-          << static_cast<int>(255.f * std::min(1.f, image[i][1])) << " "
-          << static_cast<int>(255.f * std::min(1.f, image[i][2])) << " ";
+    for (const auto &pixel: image) {
+        f << static_cast<int>(255.f * std::min(1.f, pixel[0])) << " "
+          << static_cast<int>(255.f * std::min(1.f, pixel[1])) << " "
+          << static_cast<int>(255.f * std::min(1.f, pixel[2])) << " ";
     }
-    f << std::endl;
-    std::cout << "Image exportée dans " << filename << std::endl;
+
     f.close();
+    std::cout << "Image saved to " << filename << std::endl;
 }
 
-
-void key(const unsigned char keyPressed, int _x, int _y) {
-    Vec3 pos, dir;
-    switch (keyPressed) {
+// Function to handle keyboard inputs.
+void keyboard(const unsigned char key, int _x, int _y) {
+    switch (key) {
         case 'f':
             if (fullScreen == true) {
                 glutReshapeWindow(SCREENWIDTH, SCREENHEIGHT);
@@ -300,7 +324,8 @@ void mouse(const int button, const int state, const int x, const int y) {
     idle();
 }
 
-void motion(int x, int y) {
+// Function to handle mouse motion events.
+void motion(const int x, const int y) {
     if (mouseRotatePressed == true) {
         camera.rotate(x, y);
     } else if (mouseMovePressed == true) {
@@ -336,11 +361,11 @@ int main(int argc, char **argv) {
     init();
     glutIdleFunc(idle);
     glutDisplayFunc(display);
-    glutKeyboardFunc(key);
+    glutKeyboardFunc(keyboard);
     glutReshapeFunc(reshape);
     glutMotionFunc(motion);
     glutMouseFunc(mouse);
-    key('?', 0, 0);
+    keyboard('?', 0, 0);
 
 
     camera.move(0., 0., -3.1);
@@ -352,5 +377,7 @@ int main(int argc, char **argv) {
     scenes[3].setup_cornell_box();
 
     glutMainLoop();
+
+    clear(); // Clean up resources before exiting
     return EXIT_SUCCESS;
 }

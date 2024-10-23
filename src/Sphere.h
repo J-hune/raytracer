@@ -14,8 +14,7 @@ struct RaySphereIntersection {
     Vec3 normal;
 };
 
-static
-Vec3 SphericalCoordinatesToEuclidean(Vec3 ThetaPhiR) {
+static Vec3 SphericalCoordinatesToEuclidean(Vec3 ThetaPhiR) {
     return ThetaPhiR[2] * Vec3(
         std::cos(ThetaPhiR[0]) * std::cos(ThetaPhiR[1]),
         std::sin(ThetaPhiR[0]) * std::cos(ThetaPhiR[1]),
@@ -23,13 +22,11 @@ Vec3 SphericalCoordinatesToEuclidean(Vec3 ThetaPhiR) {
     );
 }
 
-static
-Vec3 SphericalCoordinatesToEuclidean(const float theta, const float phi) {
+static Vec3 SphericalCoordinatesToEuclidean(const float theta, const float phi) {
     return {std::cos(theta) * std::cos(phi), std::sin(theta) * std::cos(phi), std::sin(phi)};
 }
 
-static
-Vec3 EuclideanCoordinatesToSpherical(Vec3 xyz) {
+static Vec3 EuclideanCoordinatesToSpherical(Vec3 xyz) {
     const float R = xyz.length();
     const float phi = std::asin(xyz[2] / R);
     const float theta = std::atan2(xyz[1], xyz[0]);
@@ -45,18 +42,18 @@ public:
     Sphere() : Mesh() {}
     Sphere(const Vec3 &c, const float r) : Mesh(), m_center(c), m_radius(r) {}
 
-    void build_arrays() {
+    void build_arrays() override {
         unsigned int nTheta = 20, nPhi = 20;
         positions_array.resize(3 * nTheta * nPhi);
         normalsArray.resize(3 * nTheta * nPhi);
         uvs_array.resize(2 * nTheta * nPhi);
         for (unsigned int thetaIt = 0; thetaIt < nTheta; ++thetaIt) {
-            float u = (float) (thetaIt) / (float) (nTheta - 1);
-            float theta = u * 2 * M_PI;
+            const float u = static_cast<float>(thetaIt) / static_cast<float>(nTheta - 1);
+            const float theta = u * 2.f * static_cast<float>(M_PI);
             for (unsigned int phiIt = 0; phiIt < nPhi; ++phiIt) {
-                unsigned int vertexIndex = thetaIt + phiIt * nTheta;
-                float v = (float) (phiIt) / (float) (nPhi - 1);
-                float phi = -M_PI / 2.0 + v * M_PI;
+                const unsigned int vertexIndex = thetaIt + phiIt * nTheta;
+                const float v = static_cast<float>(phiIt) / static_cast<float>(nPhi - 1);
+                const auto phi = static_cast<float>(-M_PI / 2.0 + v * M_PI);
                 Vec3 xyz = SphericalCoordinatesToEuclidean(theta, phi);
                 positions_array[3 * vertexIndex + 0] = m_center[0] + m_radius * xyz[0];
                 positions_array[3 * vertexIndex + 1] = m_center[1] + m_radius * xyz[1];
@@ -88,8 +85,8 @@ public:
 
     RaySphereIntersection intersect(const Ray &ray) const {
         RaySphereIntersection intersection;
-        // Equation de la sphère ||x-c||² - r² = 0 (avec x étant l'équation du rayon)
-        // Equation du rayon t² d.d + 2t d.(o-c) + ||o-c||² - r² = 0
+        // Sphere equation ||x-c||² - r² = 0 (with x being the ray equation)
+        // Ray equation t² d.d + 2t d.(o-c) + ||o-c||² - r² = 0
         const Vec3 oc = ray.origin() - m_center; // o-c
         const Vec3 d = ray.direction(); // d
 
@@ -98,19 +95,19 @@ public:
         const float c = Vec3::dot(oc, oc) - m_radius * m_radius; // ||o-c||² - r²
         const float delta = b * b - 4 * a * c;
 
-        // Si l'équation n'a pas de solution, il n'y a pas d'intersection
+        // If the equation has no solution, there is no intersection
         if (delta < 0) {
             intersection.intersectionExists = false;
             return intersection;
         }
 
-        // On sait qu'il y a une intersection, on va chercher la plus proche positive
+        // We know there is an intersection, we will look for the closest positive one
         intersection.intersectionExists = true;
 
-        const float t1 = (-b - sqrtf(delta)) / (2.0f * a); // Solution 1 : (-b - sqrt(delta)) / 2a    <= Généralement la solution la plus proche
-        const float t2 = (-b + sqrtf(delta)) / (2.0f * a); // Solution 2 : (-b + sqrt(delta)) / 2a
+        const float t1 = (-b - sqrtf(delta)) / (2.0f * a); // Solution 1: (-b - sqrt(delta)) / 2a    <= Generally the closest solution
+        const float t2 = (-b + sqrtf(delta)) / (2.0f * a); // Solution 2: (-b + sqrt(delta)) / 2a
 
-        // On garde la plus proche positive
+        // If both solutions are positive, we take the closest one else we take the positive one
         if (t1 > 0 && t2 > 0) {
             intersection.t = std::min(t1, t2);
         } else if (t1 > 0) {
@@ -118,20 +115,20 @@ public:
         } else if (t2 > 0) {
             intersection.t = t2;
         } else {
-            // Si les deux solutions sont négatives, il n'y a pas d'intersection (finalement, je ne suis pas un margoulin)
+            // If both solutions are negative, there is no intersection (finally, I'm not a crook)
             intersection.intersectionExists = false;
             return intersection;
         }
 
-        // On calcule le point d'intersection
+        // Calculate the intersection point
         intersection.intersection = ray.origin() + intersection.t * ray.direction();
 
-        // On calcule le deuxième point d'intersection s'il existe
+        // Calculate the second intersection point if the ray is not tangent to the sphere
         if (t1 > 0 && t2 > 0) {
             intersection.secondintersection = ray.origin() + t2 * ray.direction();
         }
 
-        // On calcule la normale
+        // Calculate the normal at the intersection point
         intersection.normal = (intersection.intersection - m_center) / m_radius;
         return intersection;
     }

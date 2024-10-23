@@ -9,7 +9,7 @@ LIBDIR = .
 BINDIR = build
 
 CC = g++
-CFLAGS = -Wall -O3
+CFLAGS = -Wall -O3 -std=c++20
 CPPFLAGS = -I$(INCDIR)
 LDFLAGS = -L/usr/X11R6/lib
 LDLIBS = -L$(LIBDIR) $(LIBS)
