@@ -1,14 +1,14 @@
 #ifndef Sphere_H
 #define Sphere_H
+
 #include "Vec3.h"
-#include <vector>
-#include "Mesh.h"
 #include <cmath>
+#include <vector>
 
 struct RaySphereIntersection {
-    bool intersectionExists;
-    float t;
-    float theta, phi;
+    bool intersectionExists{};
+    float t{};
+    float theta{}, phi{};
     Vec3 intersection;
     Vec3 secondintersection;
     Vec3 normal;
@@ -16,34 +16,34 @@ struct RaySphereIntersection {
 
 static
 Vec3 SphericalCoordinatesToEuclidean(Vec3 ThetaPhiR) {
-    return ThetaPhiR[2] * Vec3(cos(ThetaPhiR[0]) * cos(ThetaPhiR[1]), sin(ThetaPhiR[0]) * cos(ThetaPhiR[1]),
-                               sin(ThetaPhiR[1]));
+    return ThetaPhiR[2] * Vec3(
+        std::cos(ThetaPhiR[0]) * std::cos(ThetaPhiR[1]),
+        std::sin(ThetaPhiR[0]) * std::cos(ThetaPhiR[1]),
+        std::sin(ThetaPhiR[1])
+    );
 }
 
 static
-Vec3 SphericalCoordinatesToEuclidean(float theta, float phi) {
-    return Vec3(cos(theta) * cos(phi), sin(theta) * cos(phi), sin(phi));
+Vec3 SphericalCoordinatesToEuclidean(const float theta, const float phi) {
+    return {std::cos(theta) * std::cos(phi), std::sin(theta) * std::cos(phi), std::sin(phi)};
 }
 
 static
 Vec3 EuclideanCoordinatesToSpherical(Vec3 xyz) {
-    float R = xyz.length();
-    float phi = asin(xyz[2] / R);
-    float theta = atan2(xyz[1], xyz[0]);
-    return Vec3(theta, phi, R);
+    const float R = xyz.length();
+    const float phi = std::asin(xyz[2] / R);
+    const float theta = std::atan2(xyz[1], xyz[0]);
+    return {theta, phi, R};
 }
 
 
 class Sphere : public Mesh {
 public:
     Vec3 m_center;
-    float m_radius;
+    float m_radius{};
 
-    Sphere() : Mesh() {
-    }
-
-    Sphere(Vec3 c, float r) : Mesh(), m_center(c), m_radius(r) {
-    }
+    Sphere() : Mesh() {}
+    Sphere(const Vec3 &c, const float r) : Mesh(), m_center(c), m_radius(r) {}
 
     void build_arrays() {
         unsigned int nTheta = 20, nPhi = 20;
@@ -90,11 +90,11 @@ public:
         RaySphereIntersection intersection;
         // Equation de la sphère ||x-c||² - r² = 0 (avec x étant l'équation du rayon)
         // Equation du rayon t² d.d + 2t d.(o-c) + ||o-c||² - r² = 0
-        Vec3 oc = ray.origin() - m_center; // o-c
-        Vec3 d = ray.direction(); // d
+        const Vec3 oc = ray.origin() - m_center; // o-c
+        const Vec3 d = ray.direction(); // d
 
         const float a = Vec3::dot(d, d); // d.d
-        const float b = 2.0f * Vec3::dot(d,oc); // 2t d.(o-c)
+        const float b = 2.0f * Vec3::dot(d, oc); // 2t d.(o-c)
         const float c = Vec3::dot(oc, oc) - m_radius * m_radius; // ||o-c||² - r²
         const float delta = b * b - 4 * a * c;
 

@@ -19,31 +19,30 @@ enum LightType {
 
 struct Light {
     Vec3 material;
-    bool isInCamSpace;
+    bool isInCamSpace{};
     LightType type;
 
     Vec3 pos;
-    float radius;
+    float radius{};
 
     Mesh quad;
 
     float powerCorrection;
 
-    Light() : powerCorrection(1.0) {
+    Light() : type(), powerCorrection(1.0) {
     }
 };
 
 struct RaySceneIntersection {
     bool intersectionExists;
-    unsigned int typeOfIntersectedObject;
-    unsigned int objectIndex;
+    unsigned int typeOfIntersectedObject{};
+    unsigned int objectIndex{};
     float t;
     RayTriangleIntersection rayMeshIntersection;
     RaySphereIntersection raySphereIntersection;
     RaySquareIntersection raySquareIntersection;
 
-    RaySceneIntersection() : intersectionExists(false), t(FLT_MAX) {
-    }
+    RaySceneIntersection() : intersectionExists(false), t(FLT_MAX), rayMeshIntersection(), raySquareIntersection() {}
 };
 
 
@@ -54,117 +53,102 @@ class Scene {
     std::vector<Light> lights;
 
 public:
-    Scene() {
-    }
+    Scene() = default;
 
-    void draw() {
-        // iterer sur l'ensemble des objets, et faire leur rendu :
-        for (unsigned int It = 0; It < meshes.size(); ++It) {
-            Mesh const &mesh = meshes[It];
+    void draw() const {
+        // On itère sur l'ensemble des objets, et faire leur rendu :
+        for (const auto & mesh : meshes) {
             mesh.draw();
         }
-        for (unsigned int It = 0; It < spheres.size(); ++It) {
-            Sphere const &sphere = spheres[It];
+        for (const auto & sphere : spheres) {
             sphere.draw();
         }
-        for (unsigned int It = 0; It < squares.size(); ++It) {
-            Square const &square = squares[It];
+        for (const auto & square : squares) {
             square.draw();
         }
     }
 
-
-    RaySceneIntersection computeIntersection(Ray const &ray) {
+    RaySceneIntersection computeIntersection(Ray const &ray, const float z_near) {
         RaySceneIntersection result;
+        result.t = FLT_MAX;
 
         // Pour chaque objet de la scène, on calcule l'intersection avec le rayon
-        for (unsigned int i = 0; i < meshes.size(); ++i) {
-            Mesh const &mesh = meshes[i];
-            RayTriangleIntersection intersection = mesh.intersect(ray);
-
-            // Si l'intersection existe et est plus proche que la précédente, on la garde
-            if (intersection.intersectionExists && intersection.t < result.t) {
-                result.intersectionExists = true;
-                result.typeOfIntersectedObject = 0;
-                result.objectIndex = i;
-                result.t = intersection.t;
-                result.rayMeshIntersection = intersection;
-            }
-        }
-
-        // Pour chaque cube de la scène, on calcule l'intersection avec le rayon
-        for (unsigned int i = 0; i < squares.size(); i++) {
-            Square const &square = squares[i];
-            RaySquareIntersection intersection = square.intersect(ray);
-
-            // Si l'intersection existe et est plus proche que la précédente, on la garde
-            if (intersection.intersectionExists && intersection.t < result.t) {
-                result.intersectionExists = true;
-                result.typeOfIntersectedObject = 0;
-                result.objectIndex = i;
-                result.t = intersection.t;
-                result.raySquareIntersection = intersection;
-            }
-        }
-
-        // Pour chaque sphère de la scène, on calcule l'intersection avec le rayon
         for (unsigned int i = 0; i < spheres.size(); i++) {
-            Sphere const &sphere = spheres[i];
-            RaySphereIntersection intersection = sphere.intersect(ray);
+            const RaySphereIntersection intersection = spheres[i].intersect(ray);
 
             // Si l'intersection existe et est plus proche que la précédente, on la garde
-            if (intersection.intersectionExists && intersection.t < result.t) {
+            if (intersection.intersectionExists && intersection.t <= result.t) {
                 result.intersectionExists = true;
-                result.typeOfIntersectedObject = 0;
-                result.objectIndex = i;
-                result.t = intersection.t;
                 result.raySphereIntersection = intersection;
+                result.t = intersection.t;
+                result.objectIndex = i;
+                result.typeOfIntersectedObject = 0;
             }
         }
+
+        for (unsigned int i = 0; i < squares.size(); i++) {
+            const RaySquareIntersection intersection = squares[i].intersect(ray);
+
+            // Si l'intersection existe et est plus proche que la précédente, on la garde
+            if (intersection.intersectionExists && intersection.t <= result.t && intersection.t > z_near) {
+                result.intersectionExists = true;
+                result.raySquareIntersection = intersection;
+                result.t = intersection.t;
+                result.objectIndex = i;
+                result.typeOfIntersectedObject = 1;
+            }
+        }
+
+        for (unsigned int i = 0; i < meshes.size(); i++) {
+            const RayTriangleIntersection intersection = meshes[i].intersect(ray);
+
+            // Si l'intersection existe et est plus proche que la précédente, on la garde
+            if (intersection.intersectionExists && intersection.t <= result.t && intersection.t > z_near) {
+                result.intersectionExists = true;
+                result.rayMeshIntersection = intersection;
+                result.t = intersection.t;
+                result.objectIndex = i;
+                result.typeOfIntersectedObject = 2;
+            }
+        }
+
         return result;
     }
 
-
-    Vec3 rayTraceRecursive(Ray ray, int NRemainingBounces) {
+    Vec3 rayTraceRecursive(const Ray &ray, int NRemainingBounces, const float z_near) {
         Vec3 color;
 
         // On calcule l'intersection avec la scène
-        RaySceneIntersection intersection = computeIntersection(ray);
+        const RaySceneIntersection intersection = computeIntersection(ray, z_near);
 
-        // On récupère l'objet intersecté
-        Mesh const *mesh = nullptr;
-        Sphere const *sphere = nullptr;
-        Square const *square = nullptr;
+        if (intersection.intersectionExists) {
+            // Si l'objet intersecté est une sphère
+            if (intersection.typeOfIntersectedObject == 0) {
+                color += spheres[intersection.objectIndex].material.diffuse_material;
+            }
 
-        // Si on a pas d'intersection, on renvoie la couleur du ciel
-        if (!intersection.intersectionExists) {
-            return Vec3(1.0, 1.0, 1.0);
+            // Si l'objet intersecté est un carré
+            else if (intersection.typeOfIntersectedObject == 1) {
+                color += squares[intersection.objectIndex].material.diffuse_material;
+            }
+
+            // L'objet intersecté est donc un mesh
+            else {
+                color += meshes[intersection.objectIndex].material.diffuse_material;
+            }
+        } else {
+            color += Vec3(1.0, 1.0, 1.0);
         }
-
-        // On sait qu'on a une intersection, on récupère l'objet intersecté et sa couleur
-        if (intersection.rayMeshIntersection.intersectionExists) {
-            mesh = &meshes[intersection.objectIndex];
-            color = mesh->material.diffuse_material;
-        } else if (intersection.raySphereIntersection.intersectionExists) {
-            sphere = &spheres[intersection.objectIndex];
-            color = sphere->material.diffuse_material;
-        } else if (intersection.raySquareIntersection.intersectionExists) {
-            square = &squares[intersection.objectIndex];
-            color = square->material.diffuse_material;
-        }
-
         return color;
     }
-
 
     Vec3 rayTrace(Ray const &rayStart) {
-        Vec3 color;
-
         // On appelle la fonction récursive avec l'unique rayon et 1 rebond
-        color = rayTraceRecursive(rayStart, 1);
+        Vec3 color = rayTraceRecursive(rayStart, 1, 4.8f);
         return color;
     }
 
+    // Scène 1
     void setup_single_sphere() {
         meshes.clear();
         spheres.clear();
@@ -191,6 +175,7 @@ public:
         }
     }
 
+    // Scène 2
     void setup_multiple_spheres() {
         meshes.clear();
         spheres.clear();
@@ -227,6 +212,7 @@ public:
         }
     }
 
+    // Scène 3
     void setup_single_square() {
         meshes.clear();
         spheres.clear();
@@ -245,8 +231,8 @@ public:
             Square &s = squares[squares.size() - 1];
             s.setQuad(Vec3(-1., -1., 0.), Vec3(1., 0, 0.), Vec3(0., 1, 0.), 2., 2.);
             s.build_arrays();
-            s.material.diffuse_material = Vec3(0.8, 0.8, 0.8);
-            s.material.specular_material = Vec3(0.8, 0.8, 0.8);
+            s.material.diffuse_material = Vec3(0.19, 0.40, 0.40); // Vert sarcelle
+            s.material.specular_material = Vec3( 0.2,0.2,0.2 );
             s.material.shininess = 20;
         }
     }
@@ -277,7 +263,6 @@ public:
             s.material.shininess = 16;
         } {
             //Left Wall
-
             squares.resize(squares.size() + 1);
             Square &s = squares[squares.size() - 1];
             s.setQuad(Vec3(-1., -1., 0.), Vec3(1., 0, 0.), Vec3(0., 1, 0.), 2., 2.);
@@ -285,8 +270,8 @@ public:
             s.translate(Vec3(0., 0., -2.));
             s.rotate_y(90);
             s.build_arrays();
-            s.material.diffuse_material = Vec3(1., 0., 0.);
-            s.material.specular_material = Vec3(1., 0., 0.);
+            s.material.diffuse_material = Vec3(194.0f / 255.0f, 49.0f / 255.0f, 44.0f / 255.0f);
+            s.material.specular_material = Vec3(194.0f / 255.0f, 49.0f / 255.0f, 44.0f / 255.0f);
             s.material.shininess = 16;
         } {
             //Right Wall
@@ -297,11 +282,11 @@ public:
             s.scale(Vec3(2., 2., 1.));
             s.rotate_y(-90);
             s.build_arrays();
-            s.material.diffuse_material = Vec3(0.0, 1.0, 0.0);
-            s.material.specular_material = Vec3(0.0, 1.0, 0.0);
+            s.material.diffuse_material = Vec3(22.0f / 255.0f, 34.0f / 255.0f, 101.0f / 255.0f);
+            s.material.specular_material = Vec3(22.0f / 255.0f, 34.0f / 255.0f, 101.0f / 255.0f);
             s.material.shininess = 16;
         } {
-            //Floor
+            // Floor
             squares.resize(squares.size() + 1);
             Square &s = squares[squares.size() - 1];
             s.setQuad(Vec3(-1., -1., 0.), Vec3(1., 0, 0.), Vec3(0., 1, 0.), 2., 2.);
@@ -313,7 +298,7 @@ public:
             s.material.specular_material = Vec3(1.0, 1.0, 1.0);
             s.material.shininess = 16;
         } {
-            //Ceiling
+            // Ceiling
             squares.resize(squares.size() + 1);
             Square &s = squares[squares.size() - 1];
             s.setQuad(Vec3(-1., -1., 0.), Vec3(1., 0, 0.), Vec3(0., 1, 0.), 2., 2.);
@@ -325,7 +310,7 @@ public:
             s.material.specular_material = Vec3(1.0, 1.0, 1.0);
             s.material.shininess = 16;
         } {
-            //Front Wall
+            // Front Wall
             squares.resize(squares.size() + 1);
             Square &s = squares[squares.size() - 1];
             s.setQuad(Vec3(-1., -1., 0.), Vec3(1., 0, 0.), Vec3(0., 1, 0.), 2., 2.);
@@ -337,16 +322,15 @@ public:
             s.material.specular_material = Vec3(1.0, 1.0, 1.0);
             s.material.shininess = 16;
         } {
-            //GLASS Sphere
-
+            // GLASS Sphere
             spheres.resize(spheres.size() + 1);
             Sphere &s = spheres[spheres.size() - 1];
             s.m_center = Vec3(1.0, -1.25, 0.5);
             s.m_radius = 0.75f;
             s.build_arrays();
-            s.material.type = Material_Mirror;
-            s.material.diffuse_material = Vec3(1., 0., 0.);
-            s.material.specular_material = Vec3(1., 0., 0.);
+            s.material.type = Material_Glass;
+            s.material.diffuse_material = Vec3(194.0f / 255.0f, 49.0f / 255.0f, 44.0f / 255.0f);
+            s.material.specular_material = Vec3(194.0f / 255.0f, 49.0f / 255.0f, 44.0f / 255.0f);
             s.material.shininess = 16;
             s.material.transparency = 1.0;
             s.material.index_medium = 1.4;
@@ -357,7 +341,7 @@ public:
             s.m_center = Vec3(-1.0, -1.25, -0.5);
             s.m_radius = 0.75f;
             s.build_arrays();
-            s.material.type = Material_Glass;
+            s.material.type = Material_Mirror;
             s.material.diffuse_material = Vec3(1., 1., 1.);
             s.material.specular_material = Vec3(1., 1., 1.);
             s.material.shininess = 16;
@@ -366,6 +350,5 @@ public:
         }
     }
 };
-
 
 #endif
