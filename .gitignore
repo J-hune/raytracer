@@ -7,9 +7,11 @@
 *.exe
 *.out
 *.app
+main
 
 # Ignore object files
 *.o
+src/*.o
 *.obj
 *.lo
 *.a
