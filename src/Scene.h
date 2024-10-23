@@ -7,15 +7,12 @@
 #include "Sphere.h"
 #include "Square.h"
 
-
 #include <GL/glut.h>
-
 
 enum LightType {
     LightType_Spherical,
     LightType_Quad
 };
-
 
 struct Light {
     Vec3 material;
@@ -46,7 +43,6 @@ struct RaySceneIntersection {
     }
 };
 
-
 class Scene {
     std::vector<Mesh> meshes;
     std::vector<Sphere> spheres;
@@ -57,27 +53,21 @@ public:
     Scene() = default;
 
     void draw() const {
-        // On itère sur l'ensemble des objets, et faire leur rendu :
-        for (const auto &mesh: meshes) {
-            mesh.draw();
-        }
-        for (const auto &sphere: spheres) {
-            sphere.draw();
-        }
-        for (const auto &square: squares) {
-            square.draw();
-        }
+        // Iterate over all objects and render them:
+        for (const auto &mesh: meshes) mesh.draw();
+        for (const auto &sphere: spheres) sphere.draw();
+        for (const auto &square: squares) square.draw();
     }
 
-    RaySceneIntersection computeIntersection(Ray const &ray, const float z_near) {
+    RaySceneIntersection computeIntersection(const Ray &ray, const float z_near) {
         RaySceneIntersection result;
         result.t = FLT_MAX;
 
-        // Pour chaque objet de la scène, on calcule l'intersection avec le rayon
+        // For each object in the scene, compute the intersection with the ray
         for (unsigned int i = 0; i < spheres.size(); i++) {
             const RaySphereIntersection intersection = spheres[i].intersect(ray);
 
-            // Si l'intersection existe et est plus proche que la précédente, on la garde
+            // If the intersection exists and is closer than the previous one, keep it
             if (intersection.intersectionExists && intersection.t <= result.t) {
                 result.intersectionExists = true;
                 result.raySphereIntersection = intersection;
@@ -90,7 +80,7 @@ public:
         for (unsigned int i = 0; i < squares.size(); i++) {
             const RaySquareIntersection intersection = squares[i].intersect(ray);
 
-            // Si l'intersection existe et est plus proche que la précédente, on la garde
+            // If the intersection exists and is closer than the previous one, keep it
             if (intersection.intersectionExists && intersection.t <= result.t && intersection.t > z_near) {
                 result.intersectionExists = true;
                 result.raySquareIntersection = intersection;
@@ -103,7 +93,7 @@ public:
         for (unsigned int i = 0; i < meshes.size(); i++) {
             const RayTriangleIntersection intersection = meshes[i].intersect(ray);
 
-            // Si l'intersection existe et est plus proche que la précédente, on la garde
+            // If the intersection exists and is closer than the previous one, keep it
             if (intersection.intersectionExists && intersection.t <= result.t && intersection.t > z_near) {
                 result.intersectionExists = true;
                 result.rayMeshIntersection = intersection;
@@ -120,32 +110,29 @@ public:
         return I - 2 * Vec3::dot(I, N) * N;
     }
 
-    static Vec3 samplePointOnQuad(const Light &light) {
-        const float u = static_cast<float>(rand()) / RAND_MAX;
-        const float v = static_cast<float>(rand()) / RAND_MAX;
+    static Vec3 samplePointOnQuad(const Light &light, std::mt19937 &rng) {
+        std::uniform_real_distribution<float> dist(0.0f, 1.0f);
+        const float u = dist(rng);
+        const float v = dist(rng);
 
-        Vec3 pointOnQuad = light.quad.vertices[0].position * (1 - u) * (1 - v) +
-                           light.quad.vertices[1].position * u * (1 - v) +
-                           light.quad.vertices[2].position * u * v +
-                           light.quad.vertices[3].position * (1 - u) * v;
-
-        return pointOnQuad;
+        return  light.quad.vertices[0].position * (1 - u) * (1 - v) +
+                light.quad.vertices[1].position * u * (1 - v) +
+                light.quad.vertices[2].position * u * v +
+                light.quad.vertices[3].position * (1 - u) * v;
     }
 
-    Vec3 rayTraceRecursive(const Ray &ray, int NRemainingBounces, const float z_near) {
+    Vec3 rayTraceRecursive(const Ray &ray, int NRemainingBounces, const float z_near, std::mt19937 &rng) {
         Vec3 color(0.0, 0.0, 0.0);
-        const Vec3 ambientLight(0.1, 0.1, 0.1); // Lumière ambiante
-        const float epsilon = 1e-5f; // Pour éviter les auto-intersections
+        const Vec3 ambientLight(0.1f, 0.1f, 0.1f); // Ambient light
 
-        // Calcul de l'intersection avec la scène
+        // Compute the intersection with the scene
         const RaySceneIntersection intersection = computeIntersection(ray, z_near);
 
         if (intersection.intersectionExists) {
-            Vec3 intersectionPoint;
-            Vec3 normal;
+            Vec3 intersectionPoint, normal;
             Material material;
 
-            // On détermine l'objet intersecté (sphère, carré, mesh).
+            // Determine the intersected object (sphere, square, mesh).
             if (intersection.typeOfIntersectedObject == 0) {
                 intersectionPoint = intersection.raySphereIntersection.intersection;
                 normal = intersection.raySphereIntersection.normal;
@@ -160,104 +147,104 @@ public:
                 material = meshes[intersection.objectIndex].material;
             }
 
-            // Composante ambiante
+            // Ambient component
             color += Vec3::compProduct(material.ambient_material, ambientLight);
 
-            // Pré-normalisation du vecteur de vue
+            // Pre-normalize the view vector
             Vec3 viewDir = -ray.direction();
             viewDir.normalize();
 
-            // Pour chaque lumière dans la scène
+            // For each light in the scene
             for (const auto &light: lights) {
+                constexpr float epsilon = 1e-5f;
                 Vec3 lightDir = light.pos - intersectionPoint;
                 float lightDistance = lightDir.length();
                 lightDir.normalize();
 
-                // Si la lumière est de type sphérique
+                // If the light is spherical
                 if (light.type == LightType_Spherical) {
-                    // Vérification des ombres
+                    // Shadow check
                     Ray shadowRay(intersectionPoint + normal * epsilon, lightDir);
                     RaySceneIntersection shadowIntersection = computeIntersection(shadowRay, epsilon);
 
                     if (shadowIntersection.intersectionExists && shadowIntersection.t < lightDistance) {
-                        continue; // Le point est dans l'ombre.
+                        continue; // The point is in shadow.
                     }
 
                     Vec3 reflectDir = reflect(-lightDir, normal);
 
-                    // Composante diffuse
+                    // Diffuse component
                     float diff = std::max(Vec3::dot(normal, lightDir), 0.0f);
                     Vec3 diffuse = Vec3::compProduct(material.diffuse_material, light.material) * diff;
 
-                    // Composante spéculaire (approximation si besoin)
+                    // Specular component (approximation if needed)
                     const float spec = std::pow(std::max(Vec3::dot(viewDir, reflectDir), 0.0f), material.shininess);
                     Vec3 specular = Vec3::compProduct(material.specular_material, light.material) * spec;
 
-                    // Ajout des composantes diffuse et spéculaire à la couleur
+                    // Add diffuse and specular components to the color
                     color += diffuse + specular;
                 }
 
-                // Si la lumière est de type quad
+                // If the light is a quad
                 else if (light.type == LightType_Quad) {
-                    const int numSamples = 16; // Nombre d'échantillons pour les ombres douces
+                    const int numSamples = 16; // Number of samples for soft shadows
                     float shadowFactor = 0.0f;
-                    const float threshold = 0.8f * numSamples; // Early exit
+                    constexpr float threshold = numSamples; // Early exit
 
-                    // Échantillonnage pour les ombres douces
+                    // Sampling for soft shadows
                     for (int i = 0; i < numSamples; ++i) {
-                        Vec3 samplePoint = samplePointOnQuad(light);
+                        Vec3 samplePoint = samplePointOnQuad(light, rng);
                         Vec3 shadowDir = samplePoint - intersectionPoint;
                         float shadowDistance = shadowDir.length();
                         shadowDir.normalize();
 
-                        // Rayon pour tester l'ombre
+                        // Ray to test the shadow
                         Ray shadowRay(intersectionPoint + normal * epsilon, shadowDir);
                         RaySceneIntersection shadowIntersection = computeIntersection(shadowRay, epsilon);
 
                         if (shadowIntersection.intersectionExists && shadowIntersection.t < shadowDistance) {
                             shadowFactor += 1.0f;
-                            if (shadowFactor >= threshold) break; // Sortie anticipée si trop d'ombre
+                            if (shadowFactor >= threshold) break; // Early exit if too much shadow
                         }
                     }
 
                     float lightVisibility = 1.0f - shadowFactor / numSamples;
                     if (lightVisibility > 0.0f) {
-                        // Composante diffuse
+                        // Diffuse component
                         float diff = std::max(Vec3::dot(normal, lightDir), 0.0f);
-                        Vec3 diffuse = Vec3::compProduct(material.diffuse_material, light.material) * diff *
-                                       lightVisibility;
+                        Vec3 diffuse = Vec3::compProduct(material.diffuse_material, light.material) * diff * lightVisibility;
 
-                        // Composante spéculaire
+                        // Specular component
                         Vec3 reflectDir = reflect(-lightDir, normal);
                         const float spec = std::pow(std::max(Vec3::dot(viewDir, reflectDir), 0.0f), material.shininess);
-                        Vec3 specular = Vec3::compProduct(material.specular_material, light.material) * spec *
-                                        lightVisibility;
+                        Vec3 specular = Vec3::compProduct(material.specular_material, light.material) * spec * lightVisibility;
 
-                        // Ajout des composantes diffuse et spéculaire à la couleur
+                        // Add diffuse and specular components to the color
                         color += diffuse + specular;
                     }
                 }
             }
         } else {
-            color += Vec3(1.0, 1.0, 1.0); // Couleur de fond
+            color += Vec3(1.0, 1.0, 1.0); // Background color
         }
 
         return color;
     }
 
-
-    Vec3 rayTrace(Ray const &rayStart) {
-        // On appelle la fonction récursive avec l'unique rayon et 1 rebond
-        Vec3 color = rayTraceRecursive(rayStart, 1, 4.8f);
+    Vec3 rayTrace(Ray const &rayStart, std::mt19937 &rng) {
+        // Call the recursive function with the single ray and 1 bounce
+        Vec3 color = rayTraceRecursive(rayStart, 1, 4.8f, rng);
         return color;
     }
 
-    // Scène 1
+    // Scene 1
     void setup_single_sphere() {
         meshes.clear();
         spheres.clear();
         squares.clear();
-        lights.clear(); {
+        lights.clear();
+
+        {
             lights.resize(lights.size() + 1);
             Light &light = lights[lights.size() - 1];
             light.pos = Vec3(-5, 5, 5);
@@ -279,7 +266,7 @@ public:
         }
     }
 
-    // Scène 2
+    // Scene 2
     void setup_multiple_spheres() {
         meshes.clear();
         spheres.clear();
@@ -316,7 +303,7 @@ public:
         }
     }
 
-    // Scène 3
+    // Scene 3
     void setup_single_square() {
         meshes.clear();
         spheres.clear();
@@ -335,7 +322,7 @@ public:
             Square &s = squares[squares.size() - 1];
             s.setQuad(Vec3(-1., -1., 0.), Vec3(1., 0, 0.), Vec3(0., 1, 0.), 2., 2.);
             s.build_arrays();
-            s.material.diffuse_material = Vec3(0.19, 0.40, 0.40); // Vert sarcelle
+            s.material.diffuse_material = Vec3(0.19, 0.40, 0.40); // Teal
             s.material.specular_material = Vec3(0.2, 0.2, 0.2);
             s.material.shininess = 20;
         }
@@ -355,7 +342,7 @@ public:
             light.material = Vec3(1, 1, 1);
             light.isInCamSpace = false;
 
-            // On définit les sommets du quad
+            // Quad for the light
             Mesh quad;
             quad.vertices.emplace_back(Vec3(-0.5, 1.5, -0.5), Vec3(0, -1, 0));
             quad.vertices.emplace_back(Vec3(0.5, 1.5, -0.5), Vec3(0, -1, 0));
@@ -367,7 +354,7 @@ public:
 
             light.quad = quad;
         } {
-            //Back Wall
+            // Back Wall
             squares.resize(squares.size() + 1);
             Square &s = squares[squares.size() - 1];
             s.setQuad(Vec3(-1., -1., 0.), Vec3(1., 0, 0.), Vec3(0., 1, 0.), 2., 2.);
@@ -378,7 +365,7 @@ public:
             s.material.specular_material = Vec3(1., 1., 1.);
             s.material.shininess = 16;
         } {
-            //Left Wall
+            // Left Wall
             squares.resize(squares.size() + 1);
             Square &s = squares[squares.size() - 1];
             s.setQuad(Vec3(-1., -1., 0.), Vec3(1., 0, 0.), Vec3(0., 1, 0.), 2., 2.);
@@ -390,7 +377,7 @@ public:
             s.material.specular_material = Vec3(194.0f / 255.0f, 49.0f / 255.0f, 44.0f / 255.0f);
             s.material.shininess = 16;
         } {
-            //Right Wall
+            // Right Wall
             squares.resize(squares.size() + 1);
             Square &s = squares[squares.size() - 1];
             s.setQuad(Vec3(-1., -1., 0.), Vec3(1., 0, 0.), Vec3(0., 1, 0.), 2., 2.);
@@ -451,7 +438,7 @@ public:
             s.material.transparency = 1.0;
             s.material.index_medium = 1.4;
         } {
-            //MIRRORED Sphere
+            // MIRRORED Sphere
             spheres.resize(spheres.size() + 1);
             Sphere &s = spheres[spheres.size() - 1];
             s.m_center = Vec3(-1.0, -1.25, -0.5);

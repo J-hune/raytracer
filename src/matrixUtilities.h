@@ -180,44 +180,44 @@ void mult( const T m[16] , T x[4] , T res[4] ) {
 
 
 
+inline GLdouble modelview[16], projection[16], modelviewInverse[16], projectionInverse[16], nearAndFarPlanes[2];
 
+// Function to initialize matrices
+inline void initializeMatrices() {
+    glMatrixMode(GL_MODELVIEW);
+    glGetDoublev(GL_MODELVIEW_MATRIX, modelview);
+    gluInvertMatrix(modelview, modelviewInverse);
 
+    glMatrixMode(GL_PROJECTION);
+    glGetDoublev(GL_PROJECTION_MATRIX, projection);
+    gluInvertMatrix(projection, projectionInverse);
 
-
-// These functions are not optimized, because you probably don't want to invert the camera matrices every time!
-Vec3 cameraSpaceToWorldSpace(Vec3 const & pCS) { // pCS : p in Camera Space
-    GLdouble modelview[16];
-    GLdouble modelviewInverse[16];
-    glMatrixMode (GL_MODELVIEW);
-    glGetDoublev( GL_MODELVIEW_MATRIX, modelview );
-    gluInvertMatrix( modelview , modelviewInverse );
-    GLdouble res[4];
-    mult(modelviewInverse , (GLdouble)pCS[0] , (GLdouble)pCS[1] , (GLdouble)pCS[2] , (GLdouble)1.0 , res[0] , res[1] , res[2] , res[3]);
-    return Vec3( res[0] / res[3] , res[1] / res[3] , res[2] / res[3] );
-}
-Vec3 screen_space_to_worldSpace( float u , float v ) {
-    // u et v sont entre 0 et 1 (0,0 est en haut a gauche de l'ecran)
-    GLdouble projection[16];
-    GLdouble projectionInverse[16];
-    glMatrixMode (GL_PROJECTION);
-    glGetDoublev( GL_PROJECTION_MATRIX, projection );
-    gluInvertMatrix( projection , projectionInverse );
-    GLdouble nearAndFarPlanes[2];
     glGetDoublev( GL_DEPTH_RANGE , nearAndFarPlanes );
-    GLdouble modelview[16];
-    GLdouble modelviewInverse[16];
     glMatrixMode (GL_MODELVIEW);
-    glGetDoublev( GL_MODELVIEW_MATRIX, modelview );
-    gluInvertMatrix( modelview , modelviewInverse );
+}
+
+
+inline Vec3 cameraSpaceToWorldSpace(Vec3 const& pCS) {
+    GLdouble res[4];
+    mult(modelviewInverse, static_cast<GLdouble>(pCS[0]), static_cast<GLdouble>(pCS[1]), static_cast<GLdouble>(pCS[2]), 1.0, res[0], res[1], res[2], res[3]);
+    return {static_cast<float>(res[0] / res[3]), static_cast<float>(res[1] / res[3]), static_cast<float>(res[2] / res[3])};
+}
+
+inline Vec3 screen_space_to_worldSpace(const float u , const float v) {
+    // u et v sont entre 0 et 1 (0,0 est en haut a gauche de l'ecran)
     GLdouble resInt[4];
-    mult(projectionInverse , (GLdouble)2.f*u - 1.f , -((GLdouble)2.f*v - 1.f) , nearAndFarPlanes[0] , (GLdouble)1.0 , resInt[0] , resInt[1] , resInt[2] , resInt[3]);
+
+    // Conversion de l'espace écran en coordonnées normalisées
+    mult(projectionInverse , static_cast<GLdouble>(2.f)*u - 1.f , -(static_cast<GLdouble>(2.f)*v - 1.f) , nearAndFarPlanes[0] , 1.0 , resInt[0] , resInt[1] , resInt[2] , resInt[3]);
+
     GLdouble res[4];
     mult(modelviewInverse , resInt[0] , resInt[1] , resInt[2] , resInt[3] , res[0] , res[1] , res[2] , res[3]);
-    return Vec3( res[0] / res[3] , res[1] / res[3] , res[2] / res[3] );
+    return { static_cast<float>(res[0] / res[3]) , static_cast<float>(res[1] / res[3]) , static_cast<float>(res[2] / res[3]) };
 }
-void screen_space_to_world_space_ray(float u , float v , Vec3 & position , Vec3 & direction) {
-    position = cameraSpaceToWorldSpace( Vec3(0,0,0) );
-    direction = screen_space_to_worldSpace(u,v) - position;
+
+inline void screen_space_to_world_space_ray(const float u, const float v, Vec3& position, Vec3& direction) {
+    position = cameraSpaceToWorldSpace(Vec3(0, 0, 0));
+    direction = screen_space_to_worldSpace(u, v) - position;
     direction.normalize();
 }
 

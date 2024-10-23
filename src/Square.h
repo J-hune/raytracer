@@ -59,53 +59,53 @@ public:
     }
 
     RaySquareIntersection intersect(const Ray &ray) const {
-        RaySquareIntersection intersection;
-        intersection.intersectionExists = false;
+    RaySquareIntersection intersection;
+    intersection.intersectionExists = false;
 
-        // Récupération des données du carré
-        Vec3 m_bottom_left = vertices[0].position;
-        Vec3 m_right_vector = vertices[1].position - vertices[0].position;
-        Vec3 m_up_vector = vertices[3].position - vertices[0].position;
-        Vec3 m_normal = Vec3::cross(m_right_vector, m_up_vector);
-        m_normal.normalize();
+    // Retrieve square data
+    Vec3 m_bottom_left = vertices[0].position;
+    Vec3 m_right_vector = vertices[1].position - vertices[0].position;
+    Vec3 m_up_vector = vertices[3].position - vertices[0].position;
+    Vec3 m_normal = Vec3::cross(m_right_vector, m_up_vector);
+    m_normal.normalize();
 
-        // Calcul de l'intersection avec le plan du carré (si le rayon est parallèle, il n'y a pas d'intersection)
-        float denominator = Vec3::dot(m_normal, ray.direction());
-        float numerator = Vec3::dot(m_bottom_left - ray.origin(), m_normal);
+    // Calculate intersection with the square's plane (if the ray is parallel, there is no intersection)
+    const float denominator = Vec3::dot(m_normal, ray.direction());
+    const float numerator = Vec3::dot(m_bottom_left - ray.origin(), m_normal);
 
-        if (std::fabs(denominator) < 1e-6) {
-            return intersection; // Pas d'intersection car le rayon est parallèle au plan
-        }
-
-        // Calcul de la distance t pour laquelle le rayon intersecte le plan du carré
-        float t = numerator / denominator;
-
-        // Si t < 0, l'intersection est derrière l'origine du rayon
-        if (t < 0) {
-            return intersection; // Pas d'intersection
-        }
-
-        // Calculer le point d'intersection avec le plan
-        const Vec3 PointIntersection = ray.origin() + t * ray.direction();
-
-        // Transformer P dans l'espace local du carré
-        const Vec3 localP = PointIntersection - m_bottom_left;
-
-        // Calculer les projections sur les axes droit (right_vector) et haut (up_vector)
-        const float u = Vec3::dot(localP, m_right_vector) / m_right_vector.squareLength();
-        const float v = Vec3::dot(localP, m_up_vector) / m_up_vector.squareLength();
-
-        // Vérifier si l'intersection est à l'intérieur des limites du carré (u, v doivent être entre 0 et 1)
-        if (u >= 0 && u <= 1 && v >= 0 && v <= 1) {
-            intersection.intersectionExists = true;
-            intersection.t = t;
-            intersection.u = u;
-            intersection.v = v;
-            intersection.intersection = PointIntersection;
-            intersection.normal = m_normal;  // Normale du plan
-        }
-
-        return intersection;
+    if (std::fabs(denominator) < 1e-6) {
+        return intersection; // No intersection because the ray is parallel to the plane
     }
+
+    // Calculate the distance t at which the ray intersects the plane
+    const float t = numerator / denominator;
+
+    // If t < 0, the intersection is behind the ray's origin
+    if (t < 0) {
+        return intersection; // No intersection
+    }
+
+    // Calculate the intersection point with the plane
+    const Vec3 PointIntersection = ray.origin() + t * ray.direction();
+
+    // Transform P into the square's local space
+    const Vec3 localP = PointIntersection - m_bottom_left;
+
+    // Calculate projections on the right (right_vector) and up (up_vector) axes
+    const float u = Vec3::dot(localP, m_right_vector) / m_right_vector.squareLength();
+    const float v = Vec3::dot(localP, m_up_vector) / m_up_vector.squareLength();
+
+    // Check if the intersection is within the square's bounds (u, v must be between 0 and 1)
+    if (u >= 0 && u <= 1 && v >= 0 && v <= 1) {
+        intersection.intersectionExists = true;
+        intersection.t = t;
+        intersection.u = u;
+        intersection.v = v;
+        intersection.intersection = PointIntersection;
+        intersection.normal = m_normal;  // Plane normal
+    }
+
+    return intersection;
+}
 };
 #endif // SQUARE_H
