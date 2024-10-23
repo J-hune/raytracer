@@ -6,7 +6,7 @@ LIBS = -lglut -lGLU -lGL -lm -lpthread
 
 INCDIR = .
 LIBDIR = .
-BINDIR = .
+BINDIR = build
 
 CC = g++
 CFLAGS = -Wall -O3
@@ -14,7 +14,7 @@ CPPFLAGS = -I$(INCDIR)
 LDFLAGS = -L/usr/X11R6/lib
 LDLIBS = -L$(LIBDIR) $(LIBS)
 
-OBJS = $(SRCS:.cpp=.o)
+OBJS = $(SRCS:%.cpp=$(BINDIR)/%.o)
 
 .PHONY: all clean veryclean install installdirs dep
 
@@ -22,6 +22,10 @@ all: $(CIBLE)
 
 $(CIBLE): $(OBJS)
 	$(CC) $(OBJS) -o $(CIBLE) $(LDFLAGS) $(LDLIBS)
+
+$(BINDIR)/%.o: %.cpp
+	@mkdir -p $(dir $@)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
 
 install: $(CIBLE)
 	cp $(CIBLE) $(BINDIR)/
@@ -43,6 +47,6 @@ dep:
 -include .depend
 
 # liste des dépendances générée par 'make dep'
-src/Camera.o: src/Camera.cpp src/Camera.h src/Vec3.h src/Trackball.h
-main.o: main.cpp src/Vec3.h src/Camera.h src/Trackball.h
-src/Trackball.o: src/Trackball.cpp src/Trackball.h
+build/src/Camera.o: src/Camera.cpp src/Camera.h src/Vec3.h src/Trackball.h
+build/main.o: main.cpp src/Vec3.h src/Camera.h src/Trackball.h
+build/src/Trackball.o: src/Trackball.cpp src/Trackball.h
