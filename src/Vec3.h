@@ -35,6 +35,9 @@ public:
     static float dot( Vec3 const & a , Vec3 const & b ) {
        return a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
     }
+    Vec3 operator-() const {
+        return Vec3(-mVals[0], -mVals[1], -mVals[2]);
+    }
     static Vec3 cross( Vec3 const & a , Vec3 const & b ) {
        return Vec3( a[1]*b[2] - a[2]*b[1] ,
                     a[2]*b[0] - a[0]*b[2] ,

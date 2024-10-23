@@ -57,13 +57,13 @@ public:
 
     void draw() const {
         // On itère sur l'ensemble des objets, et faire leur rendu :
-        for (const auto & mesh : meshes) {
+        for (const auto &mesh: meshes) {
             mesh.draw();
         }
-        for (const auto & sphere : spheres) {
+        for (const auto &sphere: spheres) {
             sphere.draw();
         }
-        for (const auto & square : squares) {
+        for (const auto &square: squares) {
             square.draw();
         }
     }
@@ -115,29 +115,67 @@ public:
         return result;
     }
 
+    Vec3 reflect(const Vec3 &I, const Vec3 &N) {
+        return I - 2 * Vec3::dot(I, N) * N;
+    }
+
     Vec3 rayTraceRecursive(const Ray &ray, int NRemainingBounces, const float z_near) {
-        Vec3 color;
+        Vec3 color(0.0, 0.0, 0.0);
+        const Vec3 ambientLight(0.1, 0.1, 0.1); // Lumière ambiante
 
         // On calcule l'intersection avec la scène
         const RaySceneIntersection intersection = computeIntersection(ray, z_near);
 
         if (intersection.intersectionExists) {
+            Vec3 intersectionPoint;
+            Vec3 normal;
+            Material material;
+
             // Si l'objet intersecté est une sphère
             if (intersection.typeOfIntersectedObject == 0) {
-                color += spheres[intersection.objectIndex].material.diffuse_material;
+                intersectionPoint = intersection.raySphereIntersection.intersection;
+                normal = intersection.raySphereIntersection.normal;
+                material = spheres[intersection.objectIndex].material;
             }
-
             // Si l'objet intersecté est un carré
             else if (intersection.typeOfIntersectedObject == 1) {
-                color += squares[intersection.objectIndex].material.diffuse_material;
+                intersectionPoint = intersection.raySquareIntersection.intersection;
+                normal = intersection.raySquareIntersection.normal;
+                material = squares[intersection.objectIndex].material;
             }
 
             // L'objet intersecté est donc un mesh
             else {
-                color += meshes[intersection.objectIndex].material.diffuse_material;
+                intersectionPoint = intersection.rayMeshIntersection.intersection;
+                normal = intersection.rayMeshIntersection.normal;
+                material = meshes[intersection.objectIndex].material;
+            }
+
+            // Composante ambiante
+            color += Vec3::compProduct(material.ambient_material, ambientLight);
+
+            // Pour chaque lumière dans la scène
+            for (const auto &light: lights) {
+                Vec3 lightDir = light.pos - intersectionPoint;
+                lightDir.normalize();
+
+                Vec3 viewDir = -ray.direction();
+                viewDir.normalize();
+                Vec3 reflectDir = reflect(-lightDir, normal);
+
+                // Composante diffuse
+                float diff = std::max(Vec3::dot(normal, lightDir), 0.0f);
+                Vec3 diffuse = Vec3::compProduct(material.diffuse_material, light.material) * diff;
+
+                // Composante spéculaire
+                const float spec = std::pow(std::max(Vec3::dot(viewDir, reflectDir), 0.0f), material.shininess);
+                Vec3 specular = Vec3::compProduct(material.specular_material, light.material) * spec;
+
+                // Ajout des composantes diffuse et spéculaire à la couleur
+                color += diffuse + specular;
             }
         } else {
-            color += Vec3(1.0, 1.0, 1.0);
+            color += Vec3(1.0, 1.0, 1.0); // Couleur de fond
         }
         return color;
     }
@@ -232,7 +270,7 @@ public:
             s.setQuad(Vec3(-1., -1., 0.), Vec3(1., 0, 0.), Vec3(0., 1, 0.), 2., 2.);
             s.build_arrays();
             s.material.diffuse_material = Vec3(0.19, 0.40, 0.40); // Vert sarcelle
-            s.material.specular_material = Vec3( 0.2,0.2,0.2 );
+            s.material.specular_material = Vec3(0.2, 0.2, 0.2);
             s.material.shininess = 20;
         }
     }
