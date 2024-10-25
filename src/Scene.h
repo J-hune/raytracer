@@ -106,8 +106,8 @@ public:
         return result;
     }
 
-    Vec3 reflect(const Vec3 &I, const Vec3 &N) {
-        return I - 2 * Vec3::dot(I, N) * N;
+    static Vec3 reflect(const Vec3 &direction, const Vec3 &normal) {
+        return direction - 2.0f * Vec3::dot(direction, normal) * normal;
     }
 
     static Vec3 samplePointOnQuad(const Light &light, std::mt19937 &rng) {
@@ -125,115 +125,130 @@ public:
         Vec3 color(0.0, 0.0, 0.0);
         const Vec3 ambientLight(0.1f, 0.1f, 0.1f); // Ambient light
 
-        // Compute the intersection with the scene
+        // Compute the intersection with the scene (ray vs. (spheres, squares, meshes))
+        // We are only interested in the closest intersection
         const RaySceneIntersection intersection = computeIntersection(ray, z_near);
 
-        if (intersection.intersectionExists) {
-            Vec3 intersectionPoint, normal;
-            Material material;
+        // If there isn't any intersection, return the background color
+        if (NRemainingBounces == 0) {
+            return color;
+        }
 
-            // Determine the intersected object (sphere, square, mesh).
-            if (intersection.typeOfIntersectedObject == 0) {
-                intersectionPoint = intersection.raySphereIntersection.intersection;
-                normal = intersection.raySphereIntersection.normal;
-                material = spheres[intersection.objectIndex].material;
-            } else if (intersection.typeOfIntersectedObject == 1) {
-                intersectionPoint = intersection.raySquareIntersection.intersection;
-                normal = intersection.raySquareIntersection.normal;
-                material = squares[intersection.objectIndex].material;
-            } else {
-                intersectionPoint = intersection.rayMeshIntersection.intersection;
-                normal = intersection.rayMeshIntersection.normal;
-                material = meshes[intersection.objectIndex].material;
+        // We have an intersection, let's compute the color of the pixel
+        Vec3 intersectionPoint, normal;
+        Material material;
+
+        // Determine the intersected object (sphere, square, mesh) and retrieve the intersection point, normal and material
+        if (intersection.typeOfIntersectedObject == 0) { // Sphere
+            intersectionPoint = intersection.raySphereIntersection.intersection;
+            normal = intersection.raySphereIntersection.normal;
+            material = spheres[intersection.objectIndex].material;
+        } else if (intersection.typeOfIntersectedObject == 1) { // Square
+            intersectionPoint = intersection.raySquareIntersection.intersection;
+            normal = intersection.raySquareIntersection.normal;
+            material = squares[intersection.objectIndex].material;
+        } else { // Mesh
+            intersectionPoint = intersection.rayMeshIntersection.intersection;
+            normal = intersection.rayMeshIntersection.normal;
+            material = meshes[intersection.objectIndex].material;
+        }
+
+        // Add the ambient light to the color
+        color += Vec3::compProduct(material.ambient_material, ambientLight);
+
+        // Pre-normalize the view vector
+        Vec3 viewDir = -ray.direction();
+        viewDir.normalize();
+
+        // For each light in the scene
+        for (const auto &light: lights) {
+            constexpr float epsilon = 1e-5f;
+            Vec3 lightDir = light.pos - intersectionPoint;
+            float lightDistance = lightDir.length();
+            lightDir.normalize();
+
+            // If the light is spherical (point light) => hard shadows
+            if (light.type == LightType_Spherical) {
+                // Ray to test the shadow
+                Ray shadowRay(intersectionPoint + normal * epsilon, lightDir);
+                RaySceneIntersection shadowIntersection = computeIntersection(shadowRay, epsilon);
+
+                // If the point is in shadow, skip the light
+                if (shadowIntersection.intersectionExists && shadowIntersection.t < lightDistance) {
+                    continue; // The point is in shadow.
+                }
+
+                Vec3 reflectDir = reflect(-lightDir, normal);
+
+                // Diffuse component
+                float diff = std::max(Vec3::dot(normal, lightDir), 0.0f);
+                Vec3 diffuse = Vec3::compProduct(material.diffuse_material, light.material) * diff;
+
+                // Specular component (approximation if needed)
+                const float spec = std::pow(std::max(Vec3::dot(viewDir, reflectDir), 0.0f), material.shininess);
+                Vec3 specular = Vec3::compProduct(material.specular_material, light.material) * spec;
+
+                // Add diffuse and specular components to the color
+                color += diffuse + specular;
             }
 
-            // Ambient component
-            color += Vec3::compProduct(material.ambient_material, ambientLight);
+            // If the light is a quad (area light) => soft shadows
+            else if (light.type == LightType_Quad) {
+                constexpr int numSamples = 16; // Number of samples for soft shadows
+                float shadowFactor = 0.0f;
+                constexpr float threshold = numSamples * 0.9f;
 
-            // Pre-normalize the view vector
-            Vec3 viewDir = -ray.direction();
-            viewDir.normalize();
+                // Sampling for soft shadows
+                for (int i = 0; i < numSamples; ++i) {
+                    Vec3 samplePoint = samplePointOnQuad(light, rng);
+                    Vec3 shadowDir = samplePoint - intersectionPoint;
+                    float shadowDistance = shadowDir.length();
+                    shadowDir.normalize();
 
-            // For each light in the scene
-            for (const auto &light: lights) {
-                constexpr float epsilon = 1e-5f;
-                Vec3 lightDir = light.pos - intersectionPoint;
-                float lightDistance = lightDir.length();
-                lightDir.normalize();
-
-                // If the light is spherical
-                if (light.type == LightType_Spherical) {
-                    // Shadow check
-                    Ray shadowRay(intersectionPoint + normal * epsilon, lightDir);
+                    // Ray to test the shadow
+                    Ray shadowRay(intersectionPoint + normal * epsilon, shadowDir);
                     RaySceneIntersection shadowIntersection = computeIntersection(shadowRay, epsilon);
 
-                    if (shadowIntersection.intersectionExists && shadowIntersection.t < lightDistance) {
-                        continue; // The point is in shadow.
+                    // If the point is in shadow, increment the shadow factor
+                    // If the shadow factor is too high, skip the light
+                    if (shadowIntersection.intersectionExists && shadowIntersection.t < shadowDistance) {
+                        shadowFactor += 1.0f;
+                        if (shadowFactor >= threshold) break; // Early exit if too much shadow
                     }
+                }
 
-                    Vec3 reflectDir = reflect(-lightDir, normal);
-
+                float lightVisibility = 1.0f - shadowFactor / numSamples;
+                if (lightVisibility > 0.0f) {
                     // Diffuse component
                     float diff = std::max(Vec3::dot(normal, lightDir), 0.0f);
-                    Vec3 diffuse = Vec3::compProduct(material.diffuse_material, light.material) * diff;
+                    Vec3 diffuse = Vec3::compProduct(material.diffuse_material, light.material) * diff * lightVisibility;
 
-                    // Specular component (approximation if needed)
+                    // Specular component
+                    Vec3 reflectDir = reflect(-lightDir, normal);
                     const float spec = std::pow(std::max(Vec3::dot(viewDir, reflectDir), 0.0f), material.shininess);
-                    Vec3 specular = Vec3::compProduct(material.specular_material, light.material) * spec;
+                    Vec3 specular = Vec3::compProduct(material.specular_material, light.material) * spec * lightVisibility;
 
                     // Add diffuse and specular components to the color
                     color += diffuse + specular;
                 }
-
-                // If the light is a quad
-                else if (light.type == LightType_Quad) {
-                    const int numSamples = 16; // Number of samples for soft shadows
-                    float shadowFactor = 0.0f;
-                    constexpr float threshold = numSamples; // Early exit
-
-                    // Sampling for soft shadows
-                    for (int i = 0; i < numSamples; ++i) {
-                        Vec3 samplePoint = samplePointOnQuad(light, rng);
-                        Vec3 shadowDir = samplePoint - intersectionPoint;
-                        float shadowDistance = shadowDir.length();
-                        shadowDir.normalize();
-
-                        // Ray to test the shadow
-                        Ray shadowRay(intersectionPoint + normal * epsilon, shadowDir);
-                        RaySceneIntersection shadowIntersection = computeIntersection(shadowRay, epsilon);
-
-                        if (shadowIntersection.intersectionExists && shadowIntersection.t < shadowDistance) {
-                            shadowFactor += 1.0f;
-                            if (shadowFactor >= threshold) break; // Early exit if too much shadow
-                        }
-                    }
-
-                    float lightVisibility = 1.0f - shadowFactor / numSamples;
-                    if (lightVisibility > 0.0f) {
-                        // Diffuse component
-                        float diff = std::max(Vec3::dot(normal, lightDir), 0.0f);
-                        Vec3 diffuse = Vec3::compProduct(material.diffuse_material, light.material) * diff * lightVisibility;
-
-                        // Specular component
-                        Vec3 reflectDir = reflect(-lightDir, normal);
-                        const float spec = std::pow(std::max(Vec3::dot(viewDir, reflectDir), 0.0f), material.shininess);
-                        Vec3 specular = Vec3::compProduct(material.specular_material, light.material) * spec * lightVisibility;
-
-                        // Add diffuse and specular components to the color
-                        color += diffuse + specular;
-                    }
-                }
             }
-        } else {
-            color += Vec3(1.0, 1.0, 1.0); // Background color
         }
+
+        // If there are remaining bounces, compute the reflected ray
+        if (material.type == Material_Mirror && NRemainingBounces > 0) {
+            Vec3 reflectDir = reflect(ray.direction(), normal);
+            reflectDir.normalize();
+            Ray reflectedRay(intersectionPoint + normal * 1e-5f, reflectDir);
+            return rayTraceRecursive(reflectedRay, NRemainingBounces - 1, 0, rng);
+        }
+
 
         return color;
     }
 
     Vec3 rayTrace(Ray const &rayStart, std::mt19937 &rng) {
         // Call the recursive function with the single ray and 1 bounce
-        Vec3 color = rayTraceRecursive(rayStart, 1, 4.8f, rng);
+        Vec3 color = rayTraceRecursive(rayStart, 5, 4.8f, rng);
         return color;
     }
 
@@ -362,7 +377,7 @@ public:
             s.translate(Vec3(0., 0., -2.));
             s.build_arrays();
             s.material.diffuse_material = Vec3(1., 1., 1.);
-            s.material.specular_material = Vec3(1., 1., 1.);
+            s.material.specular_material = Vec3(0.5, 0.5, 0.5);
             s.material.shininess = 16;
         } {
             // Left Wall
@@ -398,7 +413,7 @@ public:
             s.rotate_x(-90);
             s.build_arrays();
             s.material.diffuse_material = Vec3(1.0, 1.0, 1.0);
-            s.material.specular_material = Vec3(1.0, 1.0, 1.0);
+            s.material.specular_material = Vec3(0.5, 0.5, 0.5);
             s.material.shininess = 16;
         } {
             // Ceiling
@@ -410,7 +425,7 @@ public:
             s.rotate_x(90);
             s.build_arrays();
             s.material.diffuse_material = Vec3(1.0, 1.0, 1.0);
-            s.material.specular_material = Vec3(1.0, 1.0, 1.0);
+            s.material.specular_material = Vec3(0.5, 0.5, 0.5);
             s.material.shininess = 16;
         } {
             // Front Wall
@@ -422,7 +437,7 @@ public:
             s.rotate_y(180);
             s.build_arrays();
             s.material.diffuse_material = Vec3(1.0, 1.0, 1.0);
-            s.material.specular_material = Vec3(1.0, 1.0, 1.0);
+            s.material.specular_material = Vec3(0.5, 0.5, 0.5);
             s.material.shininess = 16;
         } {
             // GLASS Sphere
