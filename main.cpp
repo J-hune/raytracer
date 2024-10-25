@@ -1,17 +1,3 @@
-// -------------------------------------------
-// gMini: A minimal OpenGL/GLUT application
-// for 3D graphics.
-// Copyright (C) 2006-2008 Tamy Boubekeur
-// All rights reserved.
-// -------------------------------------------
-
-// -------------------------------------------
-// Disclaimer: This code is not optimized and does not follow
-// best practices for class attribute access, memory
-// management, or optimization. It is designed for quick-and-dirty
-// testing purposes.
-// -------------------------------------------
-
 #include <iostream>
 #include <fstream>
 #include <vector>
@@ -56,23 +42,34 @@ std::vector<Scene> scenes;
 unsigned int selected_scene;
 
 std::vector<std::pair<Vec3, Vec3>> rays;
+std::atomic totalProcessedRows(0);
+std::atomic lastPrintedProgress(-1);
+std::mutex progressMutex;
+
 
 // Print the usage information for the application.
 void printUsage() {
     cerr << endl
-            << "gMini: A minimal OpenGL/GLUT application for 3D graphics." << endl
-            << "Author: Tamy Boubekeur (https://www.labri.fr/~boubek)" << endl << endl
-            << "Usage: ./gmini [<file.off>]" << endl
-            << "Keyboard commands" << endl
-            << "------------------" << endl
-            << " ?: Print help" << endl
-            << " w: Toggle Wireframe Mode" << endl
-            << " g: Toggle Gouraud Shading Mode" << endl
-            << " f: Toggle full screen mode" << endl
-            << " <drag>+<left button>: Rotate model" << endl
-            << " <drag>+<right button>: Move model" << endl
-            << " <drag>+<middle button>: Zoom" << endl
-            << " q, <esc>: Quit" << endl << endl;
+        << "=========================================" << endl
+        << "         Path Tracer - Usage Guide       " << endl
+        << "=========================================" << endl
+        << endl
+        << "Keyboard Commands:" << endl
+        << "------------------" << endl
+        << "  ?   : Display help" << endl
+        << "  w   : Toggle Wireframe Mode" << endl
+        << "  f   : Toggle Full Screen Mode" << endl
+        << "  r   : Render" << endl
+        << "  +   : Switch Scene" << endl
+        << endl
+        << "Mouse Controls:" << endl
+        << "---------------" << endl
+        << "  Drag + Left Button   : Rotate Model" << endl
+        << "  Drag + Right Button  : Move Model" << endl
+        << "  Drag + Middle Button : Zoom" << endl
+        << endl
+        << "  q or esc : Quit Application" << endl
+        << endl;
 }
 
 // Display usage information and exit.
@@ -108,16 +105,6 @@ void init() {
     glClearColor(0.2f, 0.2f, 0.3f, 1.0f);
 }
 
-// ------------------------------------
-// Cleanup function for freeing resources.
-// ------------------------------------
-void clear() {
-    // Implement cleanup code here if necessary.
-}
-
-// ------------------------------------
-// Render the scene.
-// ------------------------------------
 void draw() {
     glEnable(GL_LIGHTING);
     scenes[selected_scene].draw();
@@ -166,9 +153,24 @@ void idle() {
     glutPostRedisplay();
 }
 
-// Ray tracing function for a specific section of the image.
+// Print a progress bar to the console.
+void printProgressBar(const int progress) {
+    // Remove the previous progress bar
+    for (int i = 0; i < 100; i++) {
+        std::cout << "\b";
+    }
+
+    // Add the new progress bar with the format [■■■■■■□□□□□□□□□□] 26%
+    std::cout << "[";
+    for (int i = 0; i < 50; ++i) {
+        std::cout << (i < progress / 2 ? "■" : "□");
+    }
+    std::cout << "] " << progress << "%" << std::flush;
+    if (progress == 100) std::cout << std::endl;
+}
+
 void ray_trace_section(const int startY, const int endY, const int w, const int h, const unsigned int nsamples,
-                       std::vector<Vec3> &image, std::mt19937 &rng, std::uniform_real_distribution<float> &dist) {
+                       std::vector<Vec3> &image, std::mt19937 &rng, std::uniform_real_distribution<float> &dist, const int totalRows) {
     Vec3 pos, dir;
 
     // Print the launch of ray tracing and thread ID
@@ -188,6 +190,17 @@ void ray_trace_section(const int startY, const int endY, const int w, const int 
                 image[x + y * w] += color;
             }
             image[x + y * w] /= static_cast<float>(nsamples);
+        }
+
+        // Update the total processed rows
+        const int processedRows = ++totalProcessedRows;
+        const int progress = static_cast<int>(std::round(100.0 * processedRows / totalRows));
+        if (progress % 2 == 0 && progress > lastPrintedProgress) {
+            std::lock_guard lock(progressMutex);
+            if (progress > lastPrintedProgress) {
+                lastPrintedProgress = progress;
+                printProgressBar(progress);
+            }
         }
     }
 }
@@ -210,13 +223,15 @@ void ray_trace_from_camera() {
     unsigned int numThreads = std::thread::hardware_concurrency();
     std::vector<std::thread> threads;
     int sectionHeight = h / static_cast<int>(numThreads);
+    int totalRows = h;
+    totalProcessedRows = 0; // Reset the counter
     std::cout << "Ray tracing image of size " << w << "x" << h << " with " << numThreads << " threads and " << nsamples << " samples per pixel" << std::endl;
 
     // Launch threads for ray tracing
     for (unsigned int i = 0; i < numThreads; ++i) {
         int startY = static_cast<int>(i) * sectionHeight;
         int endY = (i == numThreads - 1) ? h : startY + sectionHeight;
-        threads.emplace_back(ray_trace_section, startY, endY, w, h, nsamples, std::ref(image), std::ref(rng), std::ref(dist));
+        threads.emplace_back(ray_trace_section, startY, endY, w, h, nsamples, std::ref(image), std::ref(rng), std::ref(dist), totalRows);
     }
 
     // Wait for all threads to finish
@@ -269,7 +284,6 @@ void keyboard(const unsigned char key, int _x, int _y) {
             break;
         case 'q':
         case 27:
-            clear();
             exit(0);
         case 'w':
             GLint polygonMode[2];
@@ -378,6 +392,5 @@ int main(int argc, char **argv) {
 
     glutMainLoop();
 
-    clear(); // Clean up resources before exiting
     return EXIT_SUCCESS;
 }
