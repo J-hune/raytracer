@@ -48,5 +48,5 @@ dep:
 
 # liste des dépendances générée par 'make dep'
 build/src/Camera.o: src/Camera.cpp src/Camera.h src/Vec3.h src/Trackball.h
-build/main.o: main.cpp src/Vec3.h src/Camera.h src/Trackball.h
+build/main.o: main.cpp src/Vec3.h src/Camera.h src/Trackball.h src/Scene.h
 build/src/Trackball.o: src/Trackball.cpp src/Trackball.h
