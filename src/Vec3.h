@@ -31,7 +31,15 @@ public:
     float norm() const { return length(); }
     inline
     float squareNorm() const { return squareLength(); }
-    void normalize() { float L = length(); mVals[0] /= L; mVals[1] /= L; mVals[2] /= L; }
+    Vec3 normalize() {
+        float L = length(); mVals[0] /= L; mVals[1] /= L; mVals[2] /= L;
+        return *this;
+    }
+
+    bool operator==(const Vec3 & vec3) const {
+        return mVals[0] == vec3[0] && mVals[1] == vec3[1] && mVals[2] == vec3[2];
+    }
+
     static float dot( Vec3 const & a , Vec3 const & b ) {
        return a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
     }

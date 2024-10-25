@@ -225,6 +225,7 @@ void ray_trace_from_camera() {
     int sectionHeight = h / static_cast<int>(numThreads);
     int totalRows = h;
     totalProcessedRows = 0; // Reset the counter
+    lastPrintedProgress = -1; // Reset the progress bar
     std::cout << "Ray tracing image of size " << w << "x" << h << " with " << numThreads << " threads and " << nsamples << " samples per pixel" << std::endl;
 
     // Launch threads for ray tracing

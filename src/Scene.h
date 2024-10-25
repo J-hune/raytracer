@@ -7,8 +7,6 @@
 #include "Sphere.h"
 #include "Square.h"
 
-#include <GL/glut.h>
-
 enum LightType {
     LightType_Spherical,
     LightType_Quad
@@ -106,8 +104,45 @@ public:
         return result;
     }
 
-    static Vec3 reflect(const Vec3 &direction, const Vec3 &normal) {
+    // Compute the reflected direction using the normal
+    static Vec3 computeReflectedDirection(const Vec3 &direction, const Vec3 &normal) {
         return direction - 2.0f * Vec3::dot(direction, normal) * normal;
+    }
+
+    // Compute the refracted direction using Snell's Law
+    static Vec3 computeRefractedDirection(const Vec3 &incident, const Vec3 &normal, const float &ior) {
+        // Snell's Law: etaI * sin(thetaI) = etaT * sin(thetaT)
+        float cosI = std::clamp(Vec3::dot(incident, normal), -1.0f, 1.0f);
+        float etaI = 1.0f, etaT = ior;
+        Vec3 n = normal;
+
+        // If the ray is entering the material, invert the normal and swap the refractive indices
+        if (cosI < 0) { cosI = -cosI; }
+        else { std::swap(etaI, etaT); n = -n; }
+        const float etaRatio = etaI / etaT;
+        const float k = 1 - etaRatio * etaRatio * (1 - cosI * cosI);
+
+        // If k is negative, there is total internal reflection, return a zero vector
+        return k < 0 ? Vec3(0, 0, 0) : etaRatio * incident + (etaRatio * cosI - sqrtf(k)) * n;
+    }
+
+    // Compute the Fresnel effect using Schlick's approximation
+    static float computeFresnelEffect(const Vec3 &I, const Vec3 &N, const float &ior) {
+        float cosI = std::clamp(-1.0f, 1.0f, Vec3::dot(I, N));
+        float etaI = 1.0f, etaT = ior;
+        if (cosI > 0) { std::swap(etaI, etaT); }
+
+        // Compute the sine of the angle using Snell's Law
+        const float sinT = etaI / etaT * sqrtf(std::max(0.f, 1 - cosI * cosI));
+
+        // Total internal reflection
+        if (sinT >= 1) return 1.0f;
+
+        const float cosT = sqrtf(std::max(0.f, 1 - sinT * sinT));
+        cosI = fabsf(cosI);
+        const float Rs = ((etaT * cosI) - (etaI * cosT)) / ((etaT * cosI) + (etaI * cosT));
+        const float Rp = ((etaI * cosI) - (etaT * cosT)) / ((etaI * cosI) + (etaT * cosT));
+        return (Rs * Rs + Rp * Rp) / 2;
     }
 
     static Vec3 samplePointOnQuad(const Light &light, std::mt19937 &rng) {
@@ -115,43 +150,40 @@ public:
         const float u = dist(rng);
         const float v = dist(rng);
 
-        return  light.quad.vertices[0].position * (1 - u) * (1 - v) +
-                light.quad.vertices[1].position * u * (1 - v) +
-                light.quad.vertices[2].position * u * v +
-                light.quad.vertices[3].position * (1 - u) * v;
+        return light.quad.vertices[0].position * (1 - u) * (1 - v) +
+               light.quad.vertices[1].position * u * (1 - v) +
+               light.quad.vertices[2].position * u * v +
+               light.quad.vertices[3].position * (1 - u) * v;
     }
 
-    Vec3 rayTraceRecursive(const Ray &ray, int NRemainingBounces, const float z_near, std::mt19937 &rng) {
-        Vec3 color(0.0, 0.0, 0.0);
+    // Compute the Phong components for the light (diffuse and specular only)
+    static Vec3 computePhongComponents(const Vec3 &lightDir, const Vec3 &viewDir, const Vec3 &normal, const Material &material, const Light &light) {
+        // Compute the diffuse component
+        const float diff = std::max(Vec3::dot(normal, lightDir), 0.0f);
+        const Vec3 diffuse = Vec3::compProduct(material.diffuse_material, light.material) * diff;
+
+        // Compute the reflection direction and the specular component
+        const Vec3 reflectDir = computeReflectedDirection(-lightDir, normal);
+        const float spec = static_cast<float>(std::pow(std::max(Vec3::dot(viewDir, reflectDir), 0.0f), material.shininess));
+        const Vec3 specular = Vec3::compProduct(material.specular_material, light.material) * spec;
+
+        return diffuse + specular; // Combine diffuse and specular
+    }
+
+    // Recursive ray tracing function
+    Vec3 rayTraceRecursive(const Ray &ray, const int NRemainingBounces, std::mt19937 &rng, const float z_near = 0.0f) {
+        Vec3 color(0.0f, 0.0f, 0.0f);
         const Vec3 ambientLight(0.1f, 0.1f, 0.1f); // Ambient light
 
         // Compute the intersection with the scene (ray vs. (spheres, squares, meshes))
-        // We are only interested in the closest intersection
         const RaySceneIntersection intersection = computeIntersection(ray, z_near);
 
         // If there isn't any intersection, return the background color
-        if (NRemainingBounces == 0) {
+        if (!intersection.intersectionExists || NRemainingBounces == 0) {
             return color;
         }
 
-        // We have an intersection, let's compute the color of the pixel
-        Vec3 intersectionPoint, normal;
-        Material material;
-
-        // Determine the intersected object (sphere, square, mesh) and retrieve the intersection point, normal and material
-        if (intersection.typeOfIntersectedObject == 0) { // Sphere
-            intersectionPoint = intersection.raySphereIntersection.intersection;
-            normal = intersection.raySphereIntersection.normal;
-            material = spheres[intersection.objectIndex].material;
-        } else if (intersection.typeOfIntersectedObject == 1) { // Square
-            intersectionPoint = intersection.raySquareIntersection.intersection;
-            normal = intersection.raySquareIntersection.normal;
-            material = squares[intersection.objectIndex].material;
-        } else { // Mesh
-            intersectionPoint = intersection.rayMeshIntersection.intersection;
-            normal = intersection.rayMeshIntersection.normal;
-            material = meshes[intersection.objectIndex].material;
-        }
+        auto [intersectionPoint, normal, material] = handleIntersection(intersection);
 
         // Add the ambient light to the color
         color += Vec3::compProduct(material.ambient_material, ambientLight);
@@ -163,9 +195,8 @@ public:
         // For each light in the scene
         for (const auto &light: lights) {
             constexpr float epsilon = 1e-5f;
-            Vec3 lightDir = light.pos - intersectionPoint;
+            Vec3 lightDir = (light.pos - intersectionPoint).normalize();;
             float lightDistance = lightDir.length();
-            lightDir.normalize();
 
             // If the light is spherical (point light) => hard shadows
             if (light.type == LightType_Spherical) {
@@ -178,18 +209,7 @@ public:
                     continue; // The point is in shadow.
                 }
 
-                Vec3 reflectDir = reflect(-lightDir, normal);
-
-                // Diffuse component
-                float diff = std::max(Vec3::dot(normal, lightDir), 0.0f);
-                Vec3 diffuse = Vec3::compProduct(material.diffuse_material, light.material) * diff;
-
-                // Specular component (approximation if needed)
-                const float spec = std::pow(std::max(Vec3::dot(viewDir, reflectDir), 0.0f), material.shininess);
-                Vec3 specular = Vec3::compProduct(material.specular_material, light.material) * spec;
-
-                // Add diffuse and specular components to the color
-                color += diffuse + specular;
+                color += computePhongComponents(lightDir, viewDir, normal, material, light);
             }
 
             // If the light is a quad (area light) => soft shadows
@@ -201,9 +221,8 @@ public:
                 // Sampling for soft shadows
                 for (int i = 0; i < numSamples; ++i) {
                     Vec3 samplePoint = samplePointOnQuad(light, rng);
-                    Vec3 shadowDir = samplePoint - intersectionPoint;
+                    Vec3 shadowDir = (samplePoint - intersectionPoint).normalize();
                     float shadowDistance = shadowDir.length();
-                    shadowDir.normalize();
 
                     // Ray to test the shadow
                     Ray shadowRay(intersectionPoint + normal * epsilon, shadowDir);
@@ -219,37 +238,70 @@ public:
 
                 float lightVisibility = 1.0f - shadowFactor / numSamples;
                 if (lightVisibility > 0.0f) {
-                    // Diffuse component
-                    float diff = std::max(Vec3::dot(normal, lightDir), 0.0f);
-                    Vec3 diffuse = Vec3::compProduct(material.diffuse_material, light.material) * diff * lightVisibility;
-
-                    // Specular component
-                    Vec3 reflectDir = reflect(-lightDir, normal);
-                    const float spec = std::pow(std::max(Vec3::dot(viewDir, reflectDir), 0.0f), material.shininess);
-                    Vec3 specular = Vec3::compProduct(material.specular_material, light.material) * spec * lightVisibility;
-
-                    // Add diffuse and specular components to the color
-                    color += diffuse + specular;
+                    color += computePhongComponents(lightDir, viewDir, normal, material, light) * lightVisibility;
                 }
             }
         }
 
+        Vec3 rayDirection = ray.direction();
+        rayDirection.normalize();
+        const Vec3 reflectedDirection = computeReflectedDirection(rayDirection, normal).normalize();
+        const Vec3 bias = (Vec3::dot(ray.direction(), normal) < 0) ? normal * 1e-5f : -normal * 1e-5f;
+
         // If there are remaining bounces, compute the reflected ray
         if (material.type == Material_Mirror && NRemainingBounces > 0) {
-            Vec3 reflectDir = reflect(ray.direction(), normal);
-            reflectDir.normalize();
-            Ray reflectedRay(intersectionPoint + normal * 1e-5f, reflectDir);
-            return rayTraceRecursive(reflectedRay, NRemainingBounces - 1, 0, rng);
+            const Ray reflectedRay(intersectionPoint + bias, reflectedDirection);
+            return rayTraceRecursive(reflectedRay, NRemainingBounces - 1, rng);
         }
 
+        // If the material is glass, compute the refracted ray
+        if (material.type == Material_Glass && NRemainingBounces > 0) {
+            float eta = material.index_medium;
+            Vec3 refractedDirection = computeRefractedDirection(rayDirection, normal, eta).normalize();
+            const Ray refractedRay(intersectionPoint - bias, refractedDirection);
 
-        return color;
+            // Compute Fresnel effect
+            float fresnelEffect = computeFresnelEffect(rayDirection, normal, eta);
+
+            // Trace both reflected and refracted rays
+            Vec3 reflectedColor = rayTraceRecursive(Ray(intersectionPoint + bias, reflectedDirection), NRemainingBounces - 1, rng);
+            Vec3 refractedColor = rayTraceRecursive(refractedRay, NRemainingBounces - 1, rng);
+
+            // Combine the colors based on the Fresnel effect
+            return reflectedColor * fresnelEffect + refractedColor * (1.0f - fresnelEffect);
+        }
+
+        return color; // Return the accumulated color
+    }
+
+    std::tuple<Vec3, Vec3, Material> handleIntersection(const RaySceneIntersection &intersection) const {
+        Vec3 intersectionPoint, normal;
+        Material material;
+
+        // Determine the intersected object (sphere, square, mesh)
+        if (intersection.typeOfIntersectedObject == 0) {
+            // Sphere
+            intersectionPoint = intersection.raySphereIntersection.intersection;
+            normal = intersection.raySphereIntersection.normal;
+            material = spheres[intersection.objectIndex].material;
+        } else if (intersection.typeOfIntersectedObject == 1) {
+            // Square
+            intersectionPoint = intersection.raySquareIntersection.intersection;
+            normal = intersection.raySquareIntersection.normal;
+            material = squares[intersection.objectIndex].material;
+        } else {
+            // Mesh
+            intersectionPoint = intersection.rayMeshIntersection.intersection;
+            normal = intersection.rayMeshIntersection.normal;
+            material = meshes[intersection.objectIndex].material;
+        }
+
+        return {intersectionPoint, normal, material};
     }
 
     Vec3 rayTrace(Ray const &rayStart, std::mt19937 &rng) {
         // Call the recursive function with the single ray and 1 bounce
-        Vec3 color = rayTraceRecursive(rayStart, 5, 4.8f, rng);
-        return color;
+        return rayTraceRecursive(rayStart, 5, rng, 4.8f);
     }
 
     // Scene 1
@@ -451,7 +503,7 @@ public:
             s.material.specular_material = Vec3(194.0f / 255.0f, 49.0f / 255.0f, 44.0f / 255.0f);
             s.material.shininess = 16;
             s.material.transparency = 1.0;
-            s.material.index_medium = 1.4;
+            s.material.index_medium = 1.5;
         } {
             // MIRRORED Sphere
             spheres.resize(spheres.size() + 1);
