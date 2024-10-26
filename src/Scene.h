@@ -560,17 +560,31 @@ public:
             s.material.specular_material = Vec3(22.0f / 255.0f, 34.0f / 255.0f, 101.0f / 255.0f);
             s.material.shininess = 16;
         } {
-            // Floor
-            squares.resize(squares.size() + 1);
-            Square &s = squares[squares.size() - 1];
-            s.setQuad(Vec3(-1., -1., 0.), Vec3(1., 0, 0.), Vec3(0., 1, 0.), 2., 2.);
-            s.translate(Vec3(0., 0., -2.));
-            s.scale(Vec3(2., 2., 1.));
-            s.rotate_x(-90);
-            s.build_arrays();
-            s.material.diffuse_material = Vec3(1.0, 1.0, 1.0);
-            s.material.specular_material = Vec3(0.5, 0.5, 0.5);
-            s.material.shininess = 16;
+            // Floor => Checkerboard pattern
+            const int numSquares = 8; // Number of squares per row/column
+            const float squareSize = 2.0f / numSquares;
+            squares.resize(squares.size() + numSquares * numSquares);
+            const Vec3 color1(1.0f, 1.0f, 1.0f); // Blanc
+            const Vec3 color2(0.0f, 0.0f, 0.0f); // Noir
+
+            for (int i = 0; i < numSquares; ++i) {
+                for (int j = 0; j < numSquares; ++j) {
+                    Square &s = squares[squares.size() - numSquares * (i + 1) + j];
+                    s.setQuad(
+                        Vec3(-1 + j * squareSize, -1 + i * squareSize, 0.),
+                        Vec3(squareSize, 0, 0),
+                        Vec3(0, squareSize, 0),
+                        squareSize, squareSize
+                    );
+                    s.translate(Vec3(0., 0., -2.));
+                    s.scale(Vec3(2., 2., 1.));
+                    s.rotate_x(-90);
+                    s.build_arrays();
+                    s.material.diffuse_material = ((i + j) % 2 == 0) ? color1 : color2;
+                    s.material.specular_material = Vec3(0.2f, 0.2f, 0.2f);
+                    s.material.shininess = 20;
+                }
+            }
         } {
             // Ceiling
             squares.resize(squares.size() + 1);
