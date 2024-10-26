@@ -391,6 +391,7 @@ int main(int argc, char **argv) {
     scenes[2].setup_single_square();
     scenes[3].setup_cornell_box();
 
+    scenes[3].emitPhotons(20000);
     glutMainLoop();
 
     return EXIT_SUCCESS;
