@@ -1,31 +1,19 @@
 #ifndef SCENE_H
 #define SCENE_H
 
+#include <cmath>
+#include <map>
 #include <vector>
 #include <string>
 #include "Mesh.h"
 #include "Sphere.h"
 #include "Square.h"
+#include "Light.h"
 
-enum LightType {
-    LightType_Spherical,
-    LightType_Quad
-};
-
-struct Light {
-    Vec3 material;
-    bool isInCamSpace{};
-    LightType type;
-
-    Vec3 pos;
-    float radius{};
-
-    Mesh quad;
-
-    float powerCorrection;
-
-    Light() : type(), powerCorrection(1.0) {
-    }
+struct Photon {
+    Vec3 position;
+    Vec3 direction;
+    Vec3 color;
 };
 
 struct RaySceneIntersection {
@@ -46,6 +34,7 @@ class Scene {
     std::vector<Sphere> spheres;
     std::vector<Square> squares;
     std::vector<Light> lights;
+    std::map<MaterialType, std::vector<Photon>> photonMaps;
 
 public:
     Scene() = default;
@@ -55,6 +44,16 @@ public:
         for (const auto &mesh: meshes) mesh.draw();
         for (const auto &sphere: spheres) sphere.draw();
         for (const auto &square: squares) square.draw();
+
+        // Debug : Draw the photons
+        for (const auto &[fst, snd] : photonMaps) {
+            for (const auto &[position, direction, color] : snd) {
+                glBegin(GL_LINES);
+                glVertex3f(position[0], position[1], position[2]);
+                glVertex3f(position[0] + direction[0], position[1] + direction[1], position[2] + direction[2]);
+                glEnd();
+            }
+        }
     }
 
     RaySceneIntersection computeIntersection(const Ray &ray, const float z_near) {
@@ -243,6 +242,9 @@ public:
             }
         }
 
+        // Add caustics effect
+        color += renderCaustics(intersectionPoint, normal, material);
+
         Vec3 rayDirection = ray.direction();
         rayDirection.normalize();
         const Vec3 reflectedDirection = computeReflectedDirection(rayDirection, normal).normalize();
@@ -302,6 +304,108 @@ public:
     Vec3 rayTrace(Ray const &rayStart, std::mt19937 &rng) {
         // Call the recursive function with the single ray and 1 bounce
         return rayTraceRecursive(rayStart, 5, rng, 4.8f);
+    }
+
+    static Vec3 randomDirection(std::mt19937 &rng) {
+        std::uniform_real_distribution<float> dist(0.0f, 1.0f);
+        const float theta = 2.0f * M_PIf * dist(rng);
+        constexpr float coneAngle = M_PIf / 6.f * 2.5f; // Cone angle to limit the spread of the photons
+        const float phi = coneAngle * dist(rng); // Limit phi between 0 and coneAngle
+
+        float x = std::sin(phi) * std::cos(theta);
+        float y = -std::cos(phi); // Negative to limit the direction to the upper hemisphere
+        float z = std::sin(phi) * std::sin(theta);
+
+        return {x, y, z};
+    }
+
+    void emitPhotons(const int photons) {
+        std::mt19937 rng(std::random_device{}());
+
+        for (int i = 0; i < photons; ++i) {
+            Photon photon;
+            photon.position = lights[0].pos; // Photon starts at the light position
+            photon.color = lights[0].material; // Photon color is the light color
+            photon.direction = randomDirection(rng); // Random direction for the photon
+
+            for (int j = 0; j < 5; j++) {
+                Ray ray(photon.position, photon.direction);
+                RaySceneIntersection intersection = computeIntersection(ray, 0);
+
+                if (intersection.intersectionExists) {
+                    auto [intersectionPoint, normal, material] = handleIntersection(intersection);
+
+                    // Glass material: refraction with transparency
+                    if (material.type == Material_Glass) {
+                        const Vec3 refractedDirection = computeRefractedDirection(photon.direction, normal, material.index_medium);
+                        photon.position = intersectionPoint;
+                        photon.direction = refractedDirection;
+
+                        // Add object color to the photon color (with transparency)
+                        photon.color = material.transparency * photon.color + (1 - material.transparency) * material.diffuse_material;
+                    }
+
+                    // Mirror material: reflection
+                    else if (material.type == Material_Mirror) {
+                        photon.position = intersectionPoint + normal * 1e-4f; // small bias to avoid self-intersection
+                        photon.direction = computeReflectedDirection(photon.direction, normal).normalize();
+                        photon.color = Vec3::compProduct(photon.color, material.diffuse_material);
+                    }
+
+                    // Diffuse material
+                    else {
+                        photon.color = Vec3::compProduct(photon.color, material.diffuse_material);
+                        break; // Absorption for non-dielectric materials
+                    }
+
+                    photonMaps[material.type].push_back(photon); // Add the photon to the map
+
+                } else {
+                    break; // No intersection, stop the photon
+                }
+            }
+        }
+    }
+
+    Vec3 renderCaustics(const Vec3 &position, const Vec3 &normal, const Material &material) {
+        Vec3 causticsColor(0.0f, 0.0f, 0.0f);
+
+        // Find nearby photons for the glass material and add them to the caustics color
+        std::vector<Photon> nearbyGlassPhotons = findNearbyPhotons(position, 0.4f, Material_Glass);
+        float totalWeightGlass = 0.0f;
+        for (auto &[photonPosition, direction, color] : nearbyGlassPhotons) {
+            const float cosTheta = Vec3::dot(normal, direction);
+            if (cosTheta > 0) {
+                const float distance = (photonPosition - position).length();
+                const float weight = 1.0f / (distance * distance + 1e-4f); // Pondération basée sur la distance
+                causticsColor += Vec3::compProduct(color, material.diffuse_material) * cosTheta * weight;
+                totalWeightGlass += weight;
+            }
+        }
+        if (totalWeightGlass > 0) {
+            causticsColor /= totalWeightGlass; // Normalisation
+        }
+
+        // Find nearby photons for the mirror material and add them to the caustics color
+        std::vector<Photon> nearbyMirrorPhotons = findNearbyPhotons(position, 1.5f, Material_Mirror);
+        for (const auto &[position, direction, color] : nearbyMirrorPhotons) {
+            const float cosTheta = Vec3::dot(normal, direction);
+            if (cosTheta > 0) {
+                causticsColor += Vec3::compProduct(color, material.diffuse_material) * cosTheta / static_cast<float>(nearbyMirrorPhotons.size());
+            }
+        }
+
+        return causticsColor;
+    }
+
+    std::vector<Photon> findNearbyPhotons(const Vec3 &position, const float radius, const MaterialType &materialType) {
+        std::vector<Photon> nearbyPhotons;
+        for (const auto &photon : photonMaps[materialType]) {
+            if ((photon.position - position).length() < radius) {
+                nearbyPhotons.push_back(photon);
+            }
+        }
+        return nearbyPhotons;
     }
 
     // Scene 1
