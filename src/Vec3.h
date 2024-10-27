@@ -17,6 +17,9 @@ public:
     Vec3( float x , float y , float z ) {
        mVals[0] = x; mVals[1] = y; mVals[2] = z;
     }
+    Vec3( float x ) {
+       mVals[0] = x; mVals[1] = x; mVals[2] = x;
+    }
     float & operator [] (unsigned int c) { return mVals[c]; }
     float operator [] (unsigned int c) const { return mVals[c]; }
     Vec3 operator = (Vec3 const & other) {
@@ -43,6 +46,13 @@ public:
 
     bool operator==(const Vec3 & vec3) const {
         return mVals[0] == vec3[0] && mVals[1] == vec3[1] && mVals[2] == vec3[2];
+    }
+
+    Vec3 & min(const Vec3 & vec3) {
+        mVals[0] = std::min(mVals[0], vec3[0]);
+        mVals[1] = std::min(mVals[1], vec3[1]);
+        mVals[2] = std::min(mVals[2], vec3[2]);
+        return *this;
     }
 
     static float dot( Vec3 const & a , Vec3 const & b ) {

@@ -80,12 +80,11 @@ public:
 
             // If the light is a quad (area light) => soft shadows
             else if (light.type == LightType_Quad) {
-                constexpr int numSamples = 16; // Number of samples for soft shadows
                 float shadowFactor = 0.0f;
-                constexpr float threshold = numSamples * 0.9f;
+                const float threshold = static_cast<float>(settings.shadowRays) * 0.9f;
 
                 // Sampling for soft shadows
-                for (int i = 0; i < numSamples; ++i) {
+                for (int i = 0; i < settings.shadowRays; ++i) {
                     Vec3 samplePoint = Lighting::samplePointOnQuad(light, rng);
                     Vec3 shadowDir = (samplePoint - intersectionPoint).normalize();
                     float shadowDistance = shadowDir.length();
@@ -102,7 +101,7 @@ public:
                     }
                 }
 
-                float lightVisibility = 1.0f - shadowFactor / numSamples;
+                float lightVisibility = 1.0f - shadowFactor / static_cast<float>(settings.shadowRays);
                 if (lightVisibility > 0.0f) {
                     color += Lighting::computePhongComponents(lightDir, viewDir, normal, material, light) * lightVisibility;
                 }

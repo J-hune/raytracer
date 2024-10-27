@@ -3,6 +3,7 @@
 
 #include <vector>
 #include <random>
+#include <cmath>
 
 #include "PhotonKDTree.h"
 #include "Photon.h"
@@ -28,6 +29,7 @@ public:
 
 private:
     static Vec3 randomDirection(std::mt19937 &rng);
+    static Vec3 calculateCausticsContribution(std::vector<Photon> &photons, const Vec3 &position, const Vec3 &normal, const Material &material, float maxRadius, float sigma) ;
 };
 
 #endif //PHOTONMAP_H
