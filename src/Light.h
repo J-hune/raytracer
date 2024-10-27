@@ -1,6 +1,8 @@
 #ifndef LIGHT_H
 #define LIGHT_H
 
+#include "Mesh.h"
+
 enum LightType {
     LightType_Spherical,
     LightType_Quad

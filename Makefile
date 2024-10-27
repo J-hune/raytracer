@@ -1,7 +1,9 @@
 # Makefile for a single executable
 
 TARGET = main
-SRCS = src/Camera.cpp main.cpp src/Trackball.cpp src/imageLoader.cpp src/Mesh.cpp
+SRCDIR = src
+
+SRCS = $(shell find $(SRCDIR) -name '*.cpp')  main.cpp
 LIBS = -lglut -lGLU -lGL -lm -lpthread
 
 INCDIR = .

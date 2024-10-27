@@ -6,14 +6,8 @@
 #include <algorithm>
 #include <memory>
 
+#include "Photon.h"
 #include "Vec3.h"
-
-// Structure representing a photon
-struct Photon {
-    Vec3 position;
-    Vec3 direction;
-    Vec3 color;
-};
 
 // Class representing a node in the KD tree
 struct KDNode {

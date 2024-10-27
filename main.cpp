@@ -29,8 +29,6 @@ using namespace std;
 // -------------------------------------------
 
 static GLint window;
-static int SCREENWIDTH = 480;
-static int SCREENHEIGHT = 480;
 static Camera camera;
 static bool mouseRotatePressed = false;
 static bool mouseMovePressed = false;
@@ -356,7 +354,7 @@ void motion(const int x, const int y) {
         lastX = x;
         lastY = y;
     } else if (mouseZoomPressed == true) {
-        camera.zoom(static_cast<float>(y - lastZoom) / static_cast<float>(SCREENHEIGHT));
+        camera.zoom(static_cast<float>(y - lastZoom) / static_cast<float>(settings.height));
         lastZoom = y;
     }
 }
@@ -372,7 +370,7 @@ int main(int argc, char **argv) {
     settings.width = 480;
     settings.height = 480;
     settings.samples = 10;
-    settings.photon = 10000;
+    settings.photons = 10000;
     settings.caustics = true;
     settings.drawDebugPhotons = true;
     settings.floorType = PLAIN; //PLAIN, CHECKERBOARD (checkerboard is a lot slower)
@@ -383,7 +381,7 @@ int main(int argc, char **argv) {
     }
     glutInit(&argc, argv);
     glutInitDisplayMode(GLUT_RGBA | GLUT_DEPTH | GLUT_DOUBLE);
-    glutInitWindowSize(SCREENWIDTH, SCREENHEIGHT);
+    glutInitWindowSize(settings.width, settings.height);
     window = glutCreateWindow("gMini");
 
     init();
@@ -403,8 +401,6 @@ int main(int argc, char **argv) {
     scenes[1].setup_multiple_spheres();
     scenes[2].setup_single_square();
     scenes[3].setup_cornell_box();
-
-    if (settings.caustics) scenes[3].emitPhotons(settings.photon);
     glutMainLoop();
 
     return EXIT_SUCCESS;
