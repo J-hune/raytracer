@@ -9,12 +9,7 @@
 #include "Sphere.h"
 #include "Square.h"
 #include "Light.h"
-
-struct Photon {
-    Vec3 position;
-    Vec3 direction;
-    Vec3 color;
-};
+#include "PhotonKDTree.h"
 
 struct RaySceneIntersection {
     bool intersectionExists;
@@ -34,7 +29,9 @@ class Scene {
     std::vector<Sphere> spheres;
     std::vector<Square> squares;
     std::vector<Light> lights;
-    std::map<MaterialType, std::vector<Photon>> photonMaps;
+    PhotonKDTree photonGlassTree;
+    PhotonKDTree photonMirrorTree;
+    PhotonKDTree photonDiffuseTree;
 
 public:
     Scene() = default;
@@ -46,13 +43,31 @@ public:
         for (const auto &square: squares) square.draw();
 
         // Debug : Draw the photons
-        for (const auto &[fst, snd] : photonMaps) {
-            for (const auto &[position, direction, color] : snd) {
-                glBegin(GL_LINES);
-                glVertex3f(position[0], position[1], position[2]);
-                glVertex3f(position[0] + direction[0], position[1] + direction[1], position[2] + direction[2]);
-                glEnd();
-            }
+        std::vector<Photon> glassPhotons = photonGlassTree.toVector();
+        for (const auto &[position, direction, color] : glassPhotons) {
+            glColor3f(0, 0, 1); // Couleur bleue
+            glBegin(GL_LINES);
+            glVertex3f(position[0], position[1], position[2]);
+            glVertex3f(position[0] + direction[0], position[1] + direction[1], position[2] + direction[2]);
+            glEnd();
+        }
+
+        std::vector<Photon> MirrorPhotons = photonMirrorTree.toVector();
+        for (const auto &[position, direction, color] : MirrorPhotons) {
+            glColor3f(0, 1, 0); // Couleur verte
+            glBegin(GL_LINES);
+            glVertex3f(position[0], position[1], position[2]);
+            glVertex3f(position[0] + direction[0], position[1] + direction[1], position[2] + direction[2]);
+            glEnd();
+        }
+
+        std::vector<Photon> DiffusePhotons = photonDiffuseTree.toVector();
+        for (const auto &[position, direction, color] : DiffusePhotons) {
+            glColor3f(1, 1, 1); // Couleur blanc
+            glBegin(GL_LINES);
+            glVertex3f(position[0], position[1], position[2]);
+            glVertex3f(position[0] + direction[0], position[1] + direction[1], position[2] + direction[2]);
+            glEnd();
         }
     }
 
@@ -321,8 +336,14 @@ public:
 
     void emitPhotons(const int photons) {
         std::mt19937 rng(std::random_device{}());
+        std::vector<Photon> photonsGlass, photonsMirror, photonsDiffuse;
 
         for (int i = 0; i < photons; ++i) {
+            if (lights.empty()) {
+                std::cerr << "No lights in the scene." << std::endl;
+                return;
+            }
+
             Photon photon;
             photon.position = lights[0].pos; // Photon starts at the light position
             photon.color = lights[0].material; // Photon color is the light color
@@ -343,6 +364,7 @@ public:
 
                         // Add object color to the photon color (with transparency)
                         photon.color = material.transparency * photon.color + (1 - material.transparency) * material.diffuse_material;
+                        photonsGlass.emplace_back(photon);
                     }
 
                     // Mirror material: reflection
@@ -350,28 +372,32 @@ public:
                         photon.position = intersectionPoint + normal * 1e-4f; // small bias to avoid self-intersection
                         photon.direction = computeReflectedDirection(photon.direction, normal).normalize();
                         photon.color = Vec3::compProduct(photon.color, material.diffuse_material);
+                        photonsMirror.emplace_back(photon);
                     }
 
                     // Diffuse material
                     else {
                         photon.color = Vec3::compProduct(photon.color, material.diffuse_material);
+                        photonsDiffuse.emplace_back(photon);
                         break; // Absorption for non-dielectric materials
                     }
-
-                    photonMaps[material.type].push_back(photon); // Add the photon to the map
 
                 } else {
                     break; // No intersection, stop the photon
                 }
             }
         }
+
+        photonGlassTree = PhotonKDTree(photonsGlass);
+        photonMirrorTree = PhotonKDTree(photonsMirror);
+        photonDiffuseTree = PhotonKDTree(photonsDiffuse);
     }
 
     Vec3 renderCaustics(const Vec3 &position, const Vec3 &normal, const Material &material) {
         Vec3 causticsColor(0.0f, 0.0f, 0.0f);
 
         // Find nearby photons for the glass material and add them to the caustics color
-        std::vector<Photon> nearbyGlassPhotons = findNearbyPhotons(position, 0.4f, Material_Glass);
+        std::vector<Photon> nearbyGlassPhotons = photonGlassTree.findNearestNeighbors(position, 0.4f);
         float totalWeightGlass = 0.0f;
         for (auto &[photonPosition, direction, color] : nearbyGlassPhotons) {
             const float cosTheta = Vec3::dot(normal, direction);
@@ -387,7 +413,7 @@ public:
         }
 
         // Find nearby photons for the mirror material and add them to the caustics color
-        std::vector<Photon> nearbyMirrorPhotons = findNearbyPhotons(position, 1.5f, Material_Mirror);
+        std::vector<Photon> nearbyMirrorPhotons = photonMirrorTree.findNearestNeighbors(position, 1.5f);
         for (const auto &[position, direction, color] : nearbyMirrorPhotons) {
             const float cosTheta = Vec3::dot(normal, direction);
             if (cosTheta > 0) {
@@ -396,16 +422,6 @@ public:
         }
 
         return causticsColor;
-    }
-
-    std::vector<Photon> findNearbyPhotons(const Vec3 &position, const float radius, const MaterialType &materialType) {
-        std::vector<Photon> nearbyPhotons;
-        for (const auto &photon : photonMaps[materialType]) {
-            if ((photon.position - position).length() < radius) {
-                nearbyPhotons.push_back(photon);
-            }
-        }
-        return nearbyPhotons;
     }
 
     // Scene 1

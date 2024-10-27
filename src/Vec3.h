@@ -26,6 +26,11 @@ public:
     float squareLength() const {
        return mVals[0]*mVals[0] + mVals[1]*mVals[1] + mVals[2]*mVals[2];
     }
+    float distanceSquared( Vec3 const & other ) const {
+        return (mVals[0]-other[0])*(mVals[0]-other[0]) +
+               (mVals[1]-other[1])*(mVals[1]-other[1]) +
+               (mVals[2]-other[2])*(mVals[2]-other[2]);
+    }
     float length() const { return sqrt( squareLength() ); }
     inline
     float norm() const { return length(); }
