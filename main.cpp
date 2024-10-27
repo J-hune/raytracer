@@ -15,6 +15,7 @@
 #include "src/Vec3.h"
 #include "src/Camera.h"
 #include "src/Scene.h"
+#include "src/Settings.h"
 #include <GL/glut.h>
 
 #include "src/matrixUtilities.h"
@@ -96,7 +97,8 @@ void initLight() {
 
 // Initialize the OpenGL context and settings.
 void init() {
-    camera.resize(SCREENWIDTH, SCREENHEIGHT);
+    const Settings &settings = Settings::getInstance();
+    camera.resize(settings.width, settings.height);
     initLight();
     // glCullFace(GL_BACK); // Uncomment if back face culling is needed.
     glDisable(GL_CULL_FACE);
@@ -206,10 +208,9 @@ void ray_trace_section(const int startY, const int endY, const int w, const int 
 }
 
 // Main ray tracing function from the camera perspective.
-void ray_trace_from_camera() {
+void ray_trace_from_camera(const Settings &settings) {
     int w = glutGet(GLUT_WINDOW_WIDTH), h = glutGet(GLUT_WINDOW_HEIGHT);
     camera.apply();
-    unsigned int nsamples = 100;
     std::vector<Vec3> image(w * h, Vec3(0, 0, 0));
 
     auto start = std::chrono::high_resolution_clock::now();
@@ -226,13 +227,13 @@ void ray_trace_from_camera() {
     int totalRows = h;
     totalProcessedRows = 0; // Reset the counter
     lastPrintedProgress = -1; // Reset the progress bar
-    std::cout << "Ray tracing image of size " << w << "x" << h << " with " << numThreads << " threads and " << nsamples << " samples per pixel" << std::endl;
+    std::cout << "Ray tracing image of size " << w << "x" << h << " with " << numThreads << " threads and " << settings.samples << " samples per pixel" << std::endl;
 
     // Launch threads for ray tracing
     for (unsigned int i = 0; i < numThreads; ++i) {
         int startY = static_cast<int>(i) * sectionHeight;
         int endY = (i == numThreads - 1) ? h : startY + sectionHeight;
-        threads.emplace_back(ray_trace_section, startY, endY, w, h, nsamples, std::ref(image), std::ref(rng), std::ref(dist), totalRows);
+        threads.emplace_back(ray_trace_section, startY, endY, w, h, settings.samples, std::ref(image), std::ref(rng), std::ref(dist), totalRows);
     }
 
     // Wait for all threads to finish
@@ -273,10 +274,11 @@ void ray_trace_from_camera() {
 
 // Function to handle keyboard inputs.
 void keyboard(const unsigned char key, int _x, int _y) {
+    const Settings &settings = Settings::getInstance();
     switch (key) {
         case 'f':
             if (fullScreen == true) {
-                glutReshapeWindow(SCREENWIDTH, SCREENHEIGHT);
+                glutReshapeWindow(settings.width, settings.height);
                 fullScreen = false;
             } else {
                 glutFullScreen();
@@ -298,7 +300,7 @@ void keyboard(const unsigned char key, int _x, int _y) {
         case 'r':
             camera.apply();
             rays.clear();
-            ray_trace_from_camera();
+            ray_trace_from_camera(settings);
             break;
         case '+':
             selected_scene = (selected_scene + 1) % scenes.size();
@@ -341,12 +343,14 @@ void mouse(const int button, const int state, const int x, const int y) {
 
 // Function to handle mouse motion events.
 void motion(const int x, const int y) {
+    const Settings &settings = Settings::getInstance();
+
     if (mouseRotatePressed == true) {
         camera.rotate(x, y);
     } else if (mouseMovePressed == true) {
         camera.move(
-            static_cast<float>(x - lastX) / static_cast<float>(SCREENWIDTH),
-            static_cast<float>(lastY - y) / static_cast<float>(SCREENHEIGHT),
+            static_cast<float>(x - lastX) / static_cast<float>(settings.width),
+            static_cast<float>(lastY - y) / static_cast<float>(settings.height),
             0.0
         );
         lastX = x;
@@ -364,6 +368,12 @@ void reshape(const int w, const int h) {
 
 
 int main(int argc, char **argv) {
+    Settings &settings = Settings::getInstance();
+    settings.width = 480;
+    settings.height = 480;
+    settings.samples = 100;
+    settings.photon = 100000;
+
     if (argc > 2) {
         printUsage();
         exit(EXIT_FAILURE);
@@ -391,7 +401,7 @@ int main(int argc, char **argv) {
     scenes[2].setup_single_square();
     scenes[3].setup_cornell_box();
 
-    scenes[3].emitPhotons(20000);
+    scenes[3].emitPhotons(settings.photon);
     glutMainLoop();
 
     return EXIT_SUCCESS;
