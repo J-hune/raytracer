@@ -20,19 +20,16 @@ void PhotonMap::emitPhotons(const std::vector<Light> &lights, const std::vector<
             RaySceneIntersection intersection = Intersection::computeIntersection(ray, spheres, squares, meshes, 0.0f);
 
             if (intersection.intersectionExists) {
-                auto [intersectionPoint, normal, material] = Intersection::parseIntersection(
-                    intersection, spheres, squares, meshes);
+                auto [intersectionPoint, normal, material] = Intersection::parseIntersection(intersection, spheres, squares, meshes);
 
                 // Glass material: refraction with transparency
                 if (material.type == Material_Glass) {
-                    const Vec3 refractedDirection = Lighting::computeRefractedDirection(
-                        photon.direction, normal, material.index_medium);
+                    const Vec3 refractedDirection = Lighting::computeRefractedDirection(photon.direction, normal, material.index_medium);
                     photon.position = intersectionPoint;
                     photon.direction = refractedDirection;
 
                     // Add object color to the photon color (with transparency)
-                    photon.color = material.transparency * photon.color + (1 - material.transparency) * material.
-                                   diffuse_material;
+                    photon.color = material.transparency * photon.color + (1 - material.transparency) * material.diffuse_material;
                     photonsGlass.emplace_back(photon);
                 }
 
@@ -75,10 +72,10 @@ void PhotonMap::emitPhotons(const std::vector<Light> &lights, const std::vector<
  **/
 Vec3 PhotonMap::renderCaustics(const Vec3 &position, const Vec3 &normal, const Material &material) const {
     constexpr float maxMirrorRadius = 1.5f; // Search radius for nearby mirror photons
-    constexpr float sigmaMirror = 0.5f; // Gaussian weight for controlling photon influence by distance
+    constexpr float sigmaMirror = 0.2f; // Gaussian weight for controlling photon influence by distance
 
     constexpr float maxGlassRadius = 1.0f; // Search radius for finding relevant photons
-    constexpr float sigmaGlass = 0.1f;
+    constexpr float sigmaGlass = 0.12f;
 
     // Calculate the caustics color based on mirror and glass photon contributions
     Vec3 causticsColor(0.0f, 0.0f, 0.0f); //
