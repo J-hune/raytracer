@@ -1,6 +1,6 @@
-# Makefile pour un unique exécutable
+# Makefile for a single executable
 
-CIBLE = main
+TARGET = main
 SRCS = src/Camera.cpp main.cpp src/Trackball.cpp src/imageLoader.cpp src/Mesh.cpp
 LIBS = -lglut -lGLU -lGL -lm -lpthread
 
@@ -15,20 +15,21 @@ LDFLAGS = -L/usr/X11R6/lib
 LDLIBS = -L$(LIBDIR) $(LIBS)
 
 OBJS = $(SRCS:%.cpp=$(BINDIR)/%.o)
+DEPS = $(SRCS:%.cpp=$(BINDIR)/%.d)
 
 .PHONY: all clean veryclean install installdirs dep
 
-all: $(CIBLE)
+all: $(TARGET)
 
-$(CIBLE): $(OBJS)
-	$(CC) $(OBJS) -o $(CIBLE) $(LDFLAGS) $(LDLIBS)
+$(TARGET): $(OBJS)
+	$(CC) $(OBJS) -o $(TARGET) $(LDFLAGS) $(LDLIBS)
 
 $(BINDIR)/%.o: %.cpp
 	@mkdir -p $(dir $@)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
+	$(CC) $(CPPFLAGS) $(CFLAGS) -MMD -c $< -o $@
 
-install: $(CIBLE)
-	cp $(CIBLE) $(BINDIR)/
+install: $(TARGET)
+	cp $(TARGET) $(BINDIR)/
 
 installdirs:
 	test -d $(INCDIR) || mkdir -p $(INCDIR)
@@ -36,17 +37,12 @@ installdirs:
 	test -d $(BINDIR) || mkdir -p $(BINDIR)
 
 clean:
-	rm -f *~ $(CIBLE) $(OBJS)
+	rm -f *~ $(TARGET) $(OBJS) $(DEPS)
 
 veryclean: clean
-	rm -f $(BINDIR)/$(CIBLE)
+	rm -f $(BINDIR)/$(TARGET)
 
 dep:
 	$(CC) $(CPPFLAGS) -MM $(SRCS) > .depend
 
--include .depend
-
-# liste des dépendances générée par 'make dep'
-build/src/Camera.o: src/Camera.cpp src/Camera.h src/Vec3.h src/Trackball.h
-build/main.o: main.cpp src/Vec3.h src/Camera.h src/Trackball.h src/Scene.h
-build/src/Trackball.o: src/Trackball.cpp src/Trackball.h
+-include $(DEPS)
