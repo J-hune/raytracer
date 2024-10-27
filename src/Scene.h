@@ -10,6 +10,7 @@
 #include "Square.h"
 #include "Light.h"
 #include "PhotonKDTree.h"
+#include "Settings.h"
 
 struct RaySceneIntersection {
     bool intersectionExists;
@@ -37,38 +38,14 @@ public:
     Scene() = default;
 
     void draw() const {
+        const Settings &settings = Settings::getInstance();
+
         // Iterate over all objects and render them:
         for (const auto &mesh: meshes) mesh.draw();
         for (const auto &sphere: spheres) sphere.draw();
         for (const auto &square: squares) square.draw();
 
-        // Debug : Draw the photons
-        std::vector<Photon> glassPhotons = photonGlassTree.toVector();
-        for (const auto &[position, direction, color] : glassPhotons) {
-            glColor3f(0, 0, 1); // Couleur bleue
-            glBegin(GL_LINES);
-            glVertex3f(position[0], position[1], position[2]);
-            glVertex3f(position[0] + direction[0], position[1] + direction[1], position[2] + direction[2]);
-            glEnd();
-        }
-
-        std::vector<Photon> MirrorPhotons = photonMirrorTree.toVector();
-        for (const auto &[position, direction, color] : MirrorPhotons) {
-            glColor3f(0, 1, 0); // Couleur verte
-            glBegin(GL_LINES);
-            glVertex3f(position[0], position[1], position[2]);
-            glVertex3f(position[0] + direction[0], position[1] + direction[1], position[2] + direction[2]);
-            glEnd();
-        }
-
-        std::vector<Photon> DiffusePhotons = photonDiffuseTree.toVector();
-        for (const auto &[position, direction, color] : DiffusePhotons) {
-            glColor3f(1, 1, 1); // Couleur blanc
-            glBegin(GL_LINES);
-            glVertex3f(position[0], position[1], position[2]);
-            glVertex3f(position[0] + direction[0], position[1] + direction[1], position[2] + direction[2]);
-            glEnd();
-        }
+        if (settings.drawDebugPhotons) debugDrawPhotons();
     }
 
     RaySceneIntersection computeIntersection(const Ray &ray, const float z_near) {
@@ -185,7 +162,7 @@ public:
     }
 
     // Recursive ray tracing function
-    Vec3 rayTraceRecursive(const Ray &ray, const int NRemainingBounces, std::mt19937 &rng, const float z_near = 0.0f) {
+    Vec3 rayTraceRecursive(const Ray &ray, const int NRemainingBounces, const Settings &settings, std::mt19937 &rng, const float z_near = 0.0f) {
         Vec3 color(0.0f, 0.0f, 0.0f);
         const Vec3 ambientLight(0.1f, 0.1f, 0.1f); // Ambient light
 
@@ -258,7 +235,9 @@ public:
         }
 
         // Add caustics effect
-        color += renderCaustics(intersectionPoint, normal, material);
+        if (settings.caustics) {
+            color += renderCaustics(intersectionPoint, normal, material);
+        }
 
         Vec3 rayDirection = ray.direction();
         rayDirection.normalize();
@@ -268,7 +247,7 @@ public:
         // If there are remaining bounces, compute the reflected ray
         if (material.type == Material_Mirror && NRemainingBounces > 0) {
             const Ray reflectedRay(intersectionPoint + bias, reflectedDirection);
-            return rayTraceRecursive(reflectedRay, NRemainingBounces - 1, rng);
+            return rayTraceRecursive(reflectedRay, NRemainingBounces - 1, settings, rng);
         }
 
         // If the material is glass, compute the refracted ray
@@ -281,8 +260,8 @@ public:
             float fresnelEffect = computeFresnelEffect(rayDirection, normal, eta);
 
             // Trace both reflected and refracted rays
-            Vec3 reflectedColor = rayTraceRecursive(Ray(intersectionPoint + bias, reflectedDirection), NRemainingBounces - 1, rng);
-            Vec3 refractedColor = rayTraceRecursive(refractedRay, NRemainingBounces - 1, rng);
+            Vec3 reflectedColor = rayTraceRecursive(Ray(intersectionPoint + bias, reflectedDirection), NRemainingBounces - 1, settings, rng);
+            Vec3 refractedColor = rayTraceRecursive(refractedRay, NRemainingBounces - 1, settings, rng);
 
             // Combine the colors based on the Fresnel effect
             return reflectedColor * fresnelEffect + refractedColor * (1.0f - fresnelEffect);
@@ -317,8 +296,10 @@ public:
     }
 
     Vec3 rayTrace(Ray const &rayStart, std::mt19937 &rng) {
+        const Settings &settings = Settings::getInstance();
+
         // Call the recursive function with the single ray and 1 bounce
-        return rayTraceRecursive(rayStart, 5, rng, 4.8f);
+        return rayTraceRecursive(rayStart, 5, settings, rng, 4.8f);
     }
 
     static Vec3 randomDirection(std::mt19937 &rng) {
@@ -516,6 +497,8 @@ public:
     }
 
     void setup_cornell_box() {
+        const Settings &settings = Settings::getInstance();
+
         meshes.clear();
         spheres.clear();
         squares.clear();
@@ -576,30 +559,43 @@ public:
             s.material.specular_material = Vec3(22.0f / 255.0f, 34.0f / 255.0f, 101.0f / 255.0f);
             s.material.shininess = 16;
         } {
-            // Floor => Checkerboard pattern
-            const int numSquares = 8; // Number of squares per row/column
-            const float squareSize = 2.0f / numSquares;
-            squares.resize(squares.size() + numSquares * numSquares);
-            const Vec3 color1(1.0f, 1.0f, 1.0f); // Blanc
-            const Vec3 color2(0.0f, 0.0f, 0.0f); // Noir
+            // Floor
+            if (settings.floorType == CHECKERBOARD) {
+                constexpr int numSquares = 8; // Number of squares per row/column
+                constexpr float squareSize = 2.0f / numSquares;
+                squares.resize(squares.size() + numSquares * numSquares);
+                const Vec3 color1(1.0f, 1.0f, 1.0f); // Blanc
+                const Vec3 color2(0.0f, 0.0f, 0.0f); // Noir
 
-            for (int i = 0; i < numSquares; ++i) {
-                for (int j = 0; j < numSquares; ++j) {
-                    Square &s = squares[squares.size() - numSquares * (i + 1) + j];
-                    s.setQuad(
-                        Vec3(-1 + j * squareSize, -1 + i * squareSize, 0.),
-                        Vec3(squareSize, 0, 0),
-                        Vec3(0, squareSize, 0),
-                        squareSize, squareSize
-                    );
+                for (int i = 0; i < numSquares; ++i) {
+                    for (int j = 0; j < numSquares; ++j) {
+                        Square &s = squares[squares.size() - numSquares * (i + 1) + j];
+                        s.setQuad(
+                            Vec3(-1 + j * squareSize, -1 + i * squareSize, 0.),
+                            Vec3(squareSize, 0, 0),
+                            Vec3(0, squareSize, 0),
+                            squareSize, squareSize
+                        );
+                        s.translate(Vec3(0., 0., -2.));
+                        s.scale(Vec3(2., 2., 1.));
+                        s.rotate_x(-90);
+                        s.build_arrays();
+                        s.material.diffuse_material = ((i + j) % 2 == 0) ? color1 : color2;
+                        s.material.specular_material = Vec3(0.2f, 0.2f, 0.2f);
+                        s.material.shininess = 20;
+                    }
+                }
+            } else if (settings.floorType == PLAIN) {
+                    squares.resize(squares.size() + 1);
+                    Square &s = squares[squares.size() - 1];
+                    s.setQuad(Vec3(-1., -1., 0.), Vec3(1., 0, 0.), Vec3(0., 1, 0.), 2., 2.);
                     s.translate(Vec3(0., 0., -2.));
                     s.scale(Vec3(2., 2., 1.));
                     s.rotate_x(-90);
                     s.build_arrays();
-                    s.material.diffuse_material = ((i + j) % 2 == 0) ? color1 : color2;
-                    s.material.specular_material = Vec3(0.2f, 0.2f, 0.2f);
-                    s.material.shininess = 20;
-                }
+                    s.material.diffuse_material = Vec3(1.0, 1.0, 1.0);
+                    s.material.specular_material = Vec3(0.5, 0.5, 0.5);
+                    s.material.shininess = 16;
             }
         } {
             // Ceiling
@@ -652,6 +648,43 @@ public:
             s.material.transparency = 0.;
             s.material.index_medium = 0.;
         }
+    }
+
+private:
+    void debugDrawPhotons() const {
+        glEnable(GL_LIGHTING);
+        glEnable(GL_COLOR_MATERIAL);
+        glColorMaterial(GL_FRONT, GL_AMBIENT_AND_DIFFUSE);
+
+        // Debug : Draw the photons
+        std::vector<Photon> glassPhotons = photonGlassTree.toVector();
+        for (const auto &[position, direction, color] : glassPhotons) {
+            glColor3f(0.0f, 0.3f, 0.8f);  // Bleu profond pour les Glass Photons
+            glBegin(GL_LINES);
+            glVertex3f(position[0], position[1], position[2]);
+            glVertex3f(position[0] + direction[0], position[1] + direction[1], position[2] + direction[2]);
+            glEnd();
+        }
+
+        std::vector<Photon> MirrorPhotons = photonMirrorTree.toVector();
+        for (const auto &[position, direction, color] : MirrorPhotons) {
+            glColor3f(0.3f, 0.3f, 0.3f);  // Gris foncé métallique pour les Mirror Photons
+            glBegin(GL_LINES);
+            glVertex3f(position[0], position[1], position[2]);
+            glVertex3f(position[0] + direction[0], position[1] + direction[1], position[2] + direction[2]);
+            glEnd();
+        }
+
+        std::vector<Photon> DiffusePhotons = photonDiffuseTree.toVector();
+        for (const auto &[position, direction, color] : DiffusePhotons) {
+            glColor3f(0.0f, 0.5f, 0.5f);  // Cyan saturé pour les Diffuse Photons
+            glBegin(GL_LINES);
+            glVertex3f(position[0], position[1], position[2]);
+            glVertex3f(position[0] + direction[0], position[1] + direction[1], position[2] + direction[2]);
+            glEnd();
+        }
+
+        glDisable(GL_COLOR_MATERIAL);
     }
 };
 

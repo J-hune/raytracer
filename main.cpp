@@ -371,8 +371,11 @@ int main(int argc, char **argv) {
     Settings &settings = Settings::getInstance();
     settings.width = 480;
     settings.height = 480;
-    settings.samples = 100;
-    settings.photon = 100000;
+    settings.samples = 10;
+    settings.photon = 10000;
+    settings.caustics = true;
+    settings.drawDebugPhotons = true;
+    settings.floorType = PLAIN; //PLAIN, CHECKERBOARD (checkerboard is a lot slower)
 
     if (argc > 2) {
         printUsage();
@@ -401,7 +404,7 @@ int main(int argc, char **argv) {
     scenes[2].setup_single_square();
     scenes[3].setup_cornell_box();
 
-    scenes[3].emitPhotons(settings.photon);
+    if (settings.caustics) scenes[3].emitPhotons(settings.photon);
     glutMainLoop();
 
     return EXIT_SUCCESS;
