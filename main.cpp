@@ -8,8 +8,10 @@
 #include <mutex>
 
 #include <algorithm>
+#include <condition_variable>
 #include <iomanip>
 #include <filesystem>
+#include <queue>
 #include <random>
 
 #include "src/Vec3.h"
@@ -19,14 +21,23 @@
 #include <GL/glut.h>
 
 #include "src/matrixUtilities.h"
-#include "src/imageLoader.h"
-#include "src/Material.h"
 
 using namespace std;
 
 // -------------------------------------------
 // OpenGL/GLUT application code.
 // -------------------------------------------
+struct FastRenderSettings {
+    int width;
+    int height;
+    int samples;
+    int shadowRays;
+};
+
+struct RenderTask {
+    int startY;
+    int endY;
+};
 
 static GLint window;
 static Camera camera;
@@ -44,6 +55,9 @@ std::vector<std::pair<Vec3, Vec3>> rays;
 std::atomic totalProcessedRows(0);
 std::atomic lastPrintedProgress(-1);
 std::mutex progressMutex;
+std::queue<RenderTask> taskQueue;
+std::mutex queueMutex;
+std::condition_variable queueCondition;
 
 
 // Print the usage information for the application.
@@ -58,7 +72,8 @@ void printUsage() {
         << "  ?   : Display help" << endl
         << "  w   : Toggle Wireframe Mode" << endl
         << "  f   : Toggle Full Screen Mode" << endl
-        << "  r   : Render" << endl
+        << "  p   : Quick Render" << endl
+        << "  r   : Render Render" << endl
         << "  +   : Switch Scene" << endl
         << endl
         << "Mouse Controls:" << endl
@@ -155,11 +170,6 @@ void idle() {
 
 // Print a progress bar to the console.
 void printProgressBar(const int progress) {
-    // Remove the previous progress bar
-    for (int i = 0; i < 100; i++) {
-        std::cout << "\b";
-    }
-
     // Add the new progress bar with the format [■■■■■■□□□□□□□□□□] 26%
     std::cout << "[";
     for (int i = 0; i < 50; ++i) {
@@ -169,37 +179,60 @@ void printProgressBar(const int progress) {
     if (progress == 100) std::cout << std::endl;
 }
 
-void ray_trace_section(const int startY, const int endY, const int w, const int h, const unsigned int nsamples,
-                       std::vector<Vec3> &image, std::mt19937 &rng, std::uniform_real_distribution<float> &dist, const int totalRows) {
+void ray_trace_section(const int w, const int h, const unsigned int nsamples,
+    std::vector<Vec3> &image, std::mt19937 &rng, std::uniform_real_distribution<float> &dist, const int totalRows)
+{
     Vec3 pos, dir;
 
     // Print the launch of ray tracing and thread ID
     std::ostringstream oss;
     oss << std::this_thread::get_id();
-    printf("Ray tracing section from %d to %d by thread %s\n", startY, endY, oss.str().c_str());
+    printf("Ray tracing thread %s started\n", oss.str().c_str());
 
-    // Ray tracing for the specified section
-    for (int y = startY; y < endY; y++) {
-        for (int x = 0; x < w; x++) {
-            for (unsigned int s = 0; s < nsamples; ++s) {
-                const float u = (static_cast<float>(x) + dist(rng)) / static_cast<float>(w);
-                const float v = (static_cast<float>(y) + dist(rng)) / static_cast<float>(h);
+    while (true) {
+        RenderTask task{};
 
-                screen_space_to_world_space_ray(u, v, pos, dir);
-                const Vec3 color = scenes[selected_scene].rayTrace(Ray(pos, dir), rng);
-                image[x + y * w] += color;
-            }
-            image[x + y * w] /= static_cast<float>(nsamples);
+        // Get the next task from the queue
+        {
+            std::unique_lock lock(queueMutex);
+            queueCondition.wait(lock, [&] { return !taskQueue.empty(); });
+            task = taskQueue.front();
+            taskQueue.pop();
         }
 
-        // Update the total processed rows
-        const int processedRows = ++totalProcessedRows;
-        const int progress = static_cast<int>(std::round(100.0 * processedRows / totalRows));
-        if (progress % 2 == 0 && progress > lastPrintedProgress) {
-            std::lock_guard lock(progressMutex);
-            if (progress > lastPrintedProgress) {
-                lastPrintedProgress = progress;
-                printProgressBar(progress);
+        // If the task is invalid, exit the thread
+        if (task.startY == -1) break;
+
+        // Ray tracing for the specified section
+        for (int y = task.startY; y < task.endY; y++) {
+            for (int x = 0; x < w; x++) {
+                for (unsigned int s = 0; s < nsamples; ++s) {
+                    const float u = (static_cast<float>(x) + dist(rng)) / static_cast<float>(w);
+                    const float v = (static_cast<float>(y) + dist(rng)) / static_cast<float>(h);
+
+                    screen_space_to_world_space_ray(u, v, pos, dir);
+                    const Vec3 color = scenes[selected_scene].rayTrace(Ray(pos, dir), rng);
+                    image[x + y * w] += color;
+                }
+                image[x + y * w] /= static_cast<float>(nsamples);
+            }
+
+            // Update the total processed rows
+            const int processedRows = ++totalProcessedRows;
+            const int progress = static_cast<int>(std::round(100.0 * processedRows / totalRows));
+            if (progress % 2 == 0 && progress > lastPrintedProgress) {
+                std::lock_guard lock(progressMutex);
+
+                // Remove the previous progress bar
+                for (int i = 0; i < 100; i++) {
+                    std::cout << "\b";
+                }
+
+                std::cout << "Thread " << oss.str() << " processed row " << task.startY << " - " << task.endY << " (" << progress << "%)" << std::endl;
+                if (progress > lastPrintedProgress) {
+                    lastPrintedProgress = progress;
+                    printProgressBar(progress);
+                }
             }
         }
     }
@@ -207,7 +240,7 @@ void ray_trace_section(const int startY, const int endY, const int w, const int 
 
 // Main ray tracing function from the camera perspective.
 void ray_trace_from_camera(const Settings &settings) {
-    int w = glutGet(GLUT_WINDOW_WIDTH), h = glutGet(GLUT_WINDOW_HEIGHT);
+    int w = settings.width; int h = settings.height;
     camera.apply();
     std::vector<Vec3> image(w * h, Vec3(0, 0, 0));
 
@@ -221,18 +254,27 @@ void ray_trace_from_camera(const Settings &settings) {
     // Number of threads to use
     unsigned int numThreads = std::thread::hardware_concurrency();
     std::vector<std::thread> threads;
-    int sectionHeight = h / static_cast<int>(numThreads);
     int totalRows = h;
+    int bandHeight = 10;
     totalProcessedRows = 0; // Reset the counter
     lastPrintedProgress = -1; // Reset the progress bar
-    std::cout << "Ray tracing image of size " << w << "x" << h << " with " << numThreads << " threads and " << settings.samples << " samples per pixel" << std::endl;
+    std::cout << "Ray tracing image of size " << w << "x" << h << " with " << numThreads << " threads and " << bandHeight << " rows per band" << std::endl;
 
-    // Launch threads for ray tracing
-    for (unsigned int i = 0; i < numThreads; ++i) {
-        int startY = static_cast<int>(i) * sectionHeight;
-        int endY = (i == numThreads - 1) ? h : startY + sectionHeight;
-        threads.emplace_back(ray_trace_section, startY, endY, w, h, settings.samples, std::ref(image), std::ref(rng), std::ref(dist), totalRows);
+    // Fill the task queue with bands of rows
+    for (int y = 0; y < h; y += bandHeight) {
+        taskQueue.push({y, std::min(y + bandHeight, h)});
     }
+
+    // Start the threads
+    for (unsigned int i = 0; i < numThreads; ++i) {
+        threads.emplace_back(ray_trace_section, w, h, settings.samples, std::ref(image), std::ref(rng), std::ref(dist), totalRows);
+    }
+
+    // Wait for all threads to finish
+    for (unsigned int i = 0; i < numThreads; ++i) {
+        taskQueue.push({-1, -1}); // Signal the thread to exit
+    }
+    queueCondition.notify_all(); // Notify all threads to exit
 
     // Wait for all threads to finish
     for (auto &thread: threads) {
@@ -270,6 +312,30 @@ void ray_trace_from_camera(const Settings &settings) {
     std::cout << "Image saved to " << filename << std::endl;
 }
 
+void fast_ray_trace_from_camera(const Settings &settings) {
+    // Copy the original settings
+    FastRenderSettings originalSettings{};
+    originalSettings.width = settings.width;
+    originalSettings.height = settings.height;
+    originalSettings.samples = settings.samples;
+    originalSettings.shadowRays = settings.shadowRays;
+
+    // Edit the settings for a faster render and ray trace
+    settings.width = 240;
+    settings.height = 240;
+    settings.samples = 8;
+    settings.shadowRays = 6;
+    camera.resize(settings.width, settings.height);
+    ray_trace_from_camera(settings);
+
+    // Restore the original settings
+    settings.width = originalSettings.width;
+    settings.height = originalSettings.height;
+    settings.samples = originalSettings.samples;
+    settings.shadowRays = originalSettings.shadowRays;
+    camera.resize(settings.width, settings.height);
+}
+
 // Function to handle keyboard inputs.
 void keyboard(const unsigned char key, int _x, int _y) {
     const Settings &settings = Settings::getInstance();
@@ -294,7 +360,11 @@ void keyboard(const unsigned char key, int _x, int _y) {
             else
                 glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
             break;
-
+        case 'p':
+            camera.apply();
+            rays.clear();
+            fast_ray_trace_from_camera(settings);
+            break;
         case 'r':
             camera.apply();
             rays.clear();
@@ -369,12 +439,12 @@ int main(int argc, char **argv) {
     Settings &settings = Settings::getInstance();
     settings.width = 480;
     settings.height = 480;
-    settings.samples = 10;
-    settings.photons = 10000;
+    settings.samples = 100;
     settings.shadowRays = 16;
+    settings.photons = 50000;
     settings.caustics = true;
     settings.drawDebugPhotons = true;
-    settings.floorType = PLAIN; //PLAIN, CHECKERBOARD (checkerboard is a lot slower)
+    settings.floorType = CHECKERBOARD; //PLAIN, CHECKERBOARD (checkerboard is a lot slower)
 
     if (argc > 2) {
         printUsage();
@@ -396,7 +466,7 @@ int main(int argc, char **argv) {
 
 
     camera.move(0., 0., -3.1);
-    selected_scene = 0;
+    selected_scene = 3;
     scenes.resize(4);
     scenes[0].setup_single_sphere();
     scenes[1].setup_multiple_spheres();

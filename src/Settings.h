@@ -17,10 +17,10 @@ public:
     Settings(const Settings&) = delete;
     Settings& operator=(const Settings&) = delete;
 
-    int width = 480;
-    int height = 480;
-    int samples = 100;
-    int shadowRays = 16;
+    mutable int width = 480;
+    mutable int height = 480;
+    mutable int samples = 100;
+    mutable int shadowRays = 16;
     int photons = 20000;
     bool caustics = true;
     bool drawDebugPhotons = false;
