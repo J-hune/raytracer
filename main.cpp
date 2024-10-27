@@ -371,6 +371,7 @@ int main(int argc, char **argv) {
     settings.height = 480;
     settings.samples = 10;
     settings.photons = 10000;
+    settings.shadowRays = 16;
     settings.caustics = true;
     settings.drawDebugPhotons = true;
     settings.floorType = PLAIN; //PLAIN, CHECKERBOARD (checkerboard is a lot slower)

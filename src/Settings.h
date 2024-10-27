@@ -20,6 +20,7 @@ public:
     int width = 480;
     int height = 480;
     int samples = 100;
+    int shadowRays = 16;
     int photons = 20000;
     bool caustics = true;
     bool drawDebugPhotons = false;
