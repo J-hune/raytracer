@@ -1,11 +1,7 @@
 #ifndef MATERIAL_H
 #define MATERIAL_H
 
-#include "imageLoader.h"
 #include "Vec3.h"
-#include <cmath>
-
-#include <GL/glut.h>
 
 enum MaterialType {
     Material_Diffuse_Blinn_Phong ,
@@ -18,7 +14,7 @@ struct Material {
     Vec3 ambient_material;
     Vec3 diffuse_material;
     Vec3 specular_material;
-    double shininess;
+    double shininess{};
 
     float index_medium;
     float transparency;

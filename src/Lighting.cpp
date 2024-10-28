@@ -1,4 +1,6 @@
 #include "Lighting.h"
+#include "Material.h"
+#include <algorithm>
 
 Vec3 Lighting::computePhongComponents(const Vec3 &lightDir, const Vec3 &viewDir, const Vec3 &normal, const Material &material, const Light &light) {
     const Vec3 H = (lightDir + viewDir).normalize();
@@ -7,7 +9,7 @@ Vec3 Lighting::computePhongComponents(const Vec3 &lightDir, const Vec3 &viewDir,
 
     const Vec3 ambient = Vec3::compProduct(material.ambient_material, light.material);
     const Vec3 diffuse = Vec3::compProduct(material.diffuse_material, light.material) * NdotL;
-    const Vec3 specular = Vec3::compProduct(material.specular_material, light.material) * std::pow(NdotH, material.shininess);
+    const Vec3 specular = Vec3::compProduct(material.specular_material, light.material) * static_cast<float>(std::pow(NdotH, material.shininess));
 
     return ambient + diffuse + specular;
 }

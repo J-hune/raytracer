@@ -3,8 +3,6 @@
 
 #include <string>
 #include <vector>
-#include <iostream>
-#include <fstream>
 
 // Source courtesy of J. Manson
 // http://josiahmanson.com/prose/optimize_ppm/

@@ -1,5 +1,6 @@
-
 #include "imageLoader.h"
+#include <iostream>
+#include <fstream>
 
 // Source courtesy of J. Manson
 // http://josiahmanson.com/prose/optimize_ppm/

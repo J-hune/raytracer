@@ -1,4 +1,5 @@
 #include "Intersection.h"
+#include <cfloat>
 
 RaySceneIntersection Intersection::computeIntersection(const Ray &ray, const std::vector<Sphere> &spheres, const std::vector<Square> &squares, const std::vector<Mesh> &meshes, float z_near) {
     RaySceneIntersection result;
@@ -6,7 +7,7 @@ RaySceneIntersection Intersection::computeIntersection(const Ray &ray, const std
 
     // For each object in the scene, compute the intersection with the ray
     for (unsigned int i = 0; i < spheres.size(); i++) {
-        const RaySphereIntersection intersection = spheres[i].intersect(ray);
+        const RaySphereIntersection intersection = spheres[i].intersectSphere(ray);
 
         // If the intersection exists and is closer than the previous one, keep it
         if (intersection.intersectionExists && intersection.t <= result.t) {
@@ -19,7 +20,7 @@ RaySceneIntersection Intersection::computeIntersection(const Ray &ray, const std
     }
 
     for (unsigned int i = 0; i < squares.size(); i++) {
-        const RaySquareIntersection intersection = squares[i].intersect(ray);
+        const RaySquareIntersection intersection = squares[i].intersectSquare(ray);
 
         // If the intersection exists and is closer than the previous one, keep it
         if (intersection.intersectionExists && intersection.t <= result.t && intersection.t > z_near) {

@@ -61,7 +61,7 @@ public:
         // For each light in the scene
         for (const auto &light: lights) {
             constexpr float epsilon = 1e-5f;
-            Vec3 lightDir = (light.pos - intersectionPoint).normalize();;
+            Vec3 lightDir = (light.position - intersectionPoint).normalize();;
             float lightDistance = lightDir.length();
 
             // If the light is spherical (point light) => hard shadows
@@ -169,30 +169,20 @@ public:
     /********************************************* SCENE SETUP FUNCTIONS **********************************************/
     /******************************************************************************************************************/
 
-    void add_light(Vec3 position, float radius, float powerCorrection, LightType type, Vec3 material, bool isInCamSpace) {
-        lights.emplace_back();
-        Light &light = lights.back();
-        light.pos = position;
-        light.radius = radius;
-        light.powerCorrection = powerCorrection;
-        light.type = type;
-        light.material = material;
-        light.isInCamSpace = isInCamSpace;
-    }
-
     // Scene 1
     void setup_single_sphere() {
         meshes.clear();
         spheres.clear();
         squares.clear();
         lights.clear();
-        add_light(Vec3(-5, 5, 5), 2.5f, 2.f, LightType_Spherical, Vec3(1, 1, 1), false);
+        const Light light(Vec3(-5, 5, 5), LightType_Spherical, Vec3(1, 1, 1), 2.5f, 2.f, false);
+        lights.push_back(light);
         {
             spheres.resize(spheres.size() + 1);
             Sphere &s = spheres[spheres.size() - 1];
             s.m_center = Vec3(0., 0., 0.);
             s.m_radius = 1.f;
-            s.build_arrays();
+            s.buildArrays();
             s.material.type = Material_Mirror;
             s.material.diffuse_material = Vec3(0.811, 0.031, 0.129);
             s.material.specular_material = Vec3(0.2, 0.2, 0.2);
@@ -206,13 +196,14 @@ public:
         spheres.clear();
         squares.clear();
         lights.clear();
-        add_light(Vec3(-5, 5, 5), 1.5f, 2.f, LightType_Spherical, Vec3(1, 1, 1), false);
+        const Light light(Vec3(-5, 5, 5), LightType_Spherical, Vec3(1, 1, 1), 1.5f, 2.f, false);
+        lights.push_back(light);
         {
             spheres.resize(spheres.size() + 1);
             Sphere &s = spheres[spheres.size() - 1];
             s.m_center = Vec3(1., 0., 0.);
             s.m_radius = 1.f;
-            s.build_arrays();
+            s.buildArrays();
             s.material.type = Material_Mirror;
             s.material.diffuse_material = Vec3(0.811, 0.031, 0.129);
             s.material.specular_material = Vec3(0.2, 0.2, 0.2);
@@ -222,7 +213,7 @@ public:
             Sphere &s = spheres[spheres.size() - 1];
             s.m_center = Vec3(-1., 0., 0.);
             s.m_radius = 1.f;
-            s.build_arrays();
+            s.buildArrays();
             s.material.type = Material_Mirror;
             s.material.diffuse_material = Vec3(0.129, 0.811, 0.031);
             s.material.specular_material = Vec3(0.2, 0.2, 0.2);
@@ -236,12 +227,13 @@ public:
         spheres.clear();
         squares.clear();
         lights.clear();
-        add_light(Vec3(-5, 5, 5), 2.5f, 2.f, LightType_Spherical, Vec3(1, 1, 1), false);
+        const Light light(Vec3(-5, 5, 5), LightType_Spherical, Vec3(1, 1, 1), 2.5f, 2.f, false);
+        lights.push_back(light);
         {
             squares.resize(squares.size() + 1);
             Square &s = squares[squares.size() - 1];
             s.setQuad(Vec3(-1., -1., 0.), Vec3(1., 0, 0.), Vec3(0., 1, 0.), 2., 2.);
-            s.build_arrays();
+            s.buildArrays();
             s.material.diffuse_material = Vec3(0.19, 0.40, 0.40); // Teal
             s.material.specular_material = Vec3(0.2, 0.2, 0.2);
             s.material.shininess = 20;
@@ -254,35 +246,26 @@ public:
         meshes.clear();
         spheres.clear();
         squares.clear();
-        lights.clear(); {
-            lights.resize(lights.size() + 1);
-            Light &light = lights[lights.size() - 1];
-            light.pos = Vec3(0.0, 1.5, 0.0);
-            light.radius = 2.5f;
-            light.powerCorrection = 2.f;
-            light.type = LightType_Quad;
-            light.material = Vec3(1, 1, 1);
-            light.isInCamSpace = false;
+        lights.clear();
+        const Light light(Vec3(0.0, 1.5, 0.0), LightType_Quad, Vec3(1, 1, 1), 2.5f, 2.f, false);
+        light.quad = Mesh();
+        light.quad.vertices.emplace_back(Vec3(-0.5, 1.5, -0.5), Vec3(0, -1, 0));
+        light.quad.vertices.emplace_back(Vec3(0.5, 1.5, -0.5), Vec3(0, -1, 0));
+        light.quad.vertices.emplace_back(Vec3(0.5, 1.5, 0.5), Vec3(0, -1, 0));
+        light.quad.vertices.emplace_back(Vec3(-0.5, 1.5, 0.5), Vec3(0, -1, 0));
+        light.quad.triangles.emplace_back(0, 1, 2);
+        light.quad.triangles.emplace_back(0, 2, 3);
+        light.quad.buildArrays();
+        lights.push_back(light);
 
-            // Quad for the light
-            Mesh quad;
-            quad.vertices.emplace_back(Vec3(-0.5, 1.5, -0.5), Vec3(0, -1, 0));
-            quad.vertices.emplace_back(Vec3(0.5, 1.5, -0.5), Vec3(0, -1, 0));
-            quad.vertices.emplace_back(Vec3(0.5, 1.5, 0.5), Vec3(0, -1, 0));
-            quad.vertices.emplace_back(Vec3(-0.5, 1.5, 0.5), Vec3(0, -1, 0));
-            quad.triangles.emplace_back(0, 1, 2);
-            quad.triangles.emplace_back(0, 2, 3);
-            quad.build_arrays();
-
-            light.quad = quad;
-        } {
+        {
             // Back Wall
             squares.resize(squares.size() + 1);
             Square &s = squares[squares.size() - 1];
             s.setQuad(Vec3(-1., -1., 0.), Vec3(1., 0, 0.), Vec3(0., 1, 0.), 2., 2.);
             s.scale(Vec3(2., 2., 1.));
             s.translate(Vec3(0., 0., -2.));
-            s.build_arrays();
+            s.buildArrays();
             s.material.diffuse_material = Vec3(1., 1., 1.);
             s.material.specular_material = Vec3(0.05, 0.05, 0.05);
             s.material.shininess = 5;
@@ -293,8 +276,8 @@ public:
             s.setQuad(Vec3(-1., -1., 0.), Vec3(1., 0, 0.), Vec3(0., 1, 0.), 2., 2.);
             s.scale(Vec3(2., 2., 1.));
             s.translate(Vec3(0., 0., -2.));
-            s.rotate_y(90);
-            s.build_arrays();
+            s.rotateY(90);
+            s.buildArrays();
             s.material.diffuse_material = Vec3(194.0f / 255.0f, 49.0f / 255.0f, 44.0f / 255.0f);
             s.material.specular_material = Vec3(194.0f / 255.0f, 49.0f / 255.0f, 44.0f / 255.0f) * 0.5f;
             s.material.shininess = 16;
@@ -305,8 +288,8 @@ public:
             s.setQuad(Vec3(-1., -1., 0.), Vec3(1., 0, 0.), Vec3(0., 1, 0.), 2., 2.);
             s.translate(Vec3(0., 0., -2.));
             s.scale(Vec3(2., 2., 1.));
-            s.rotate_y(-90);
-            s.build_arrays();
+            s.rotateY(-90);
+            s.buildArrays();
             s.material.diffuse_material = Vec3(22.0f / 255.0f, 34.0f / 255.0f, 101.0f / 255.0f);
             s.material.specular_material = Vec3(22.0f / 255.0f, 34.0f / 255.0f, 101.0f / 255.0f) * 0.5f;
             s.material.shininess = 16;
@@ -330,8 +313,8 @@ public:
                         );
                         s.translate(Vec3(0., 0., -2.));
                         s.scale(Vec3(2., 2., 1.));
-                        s.rotate_x(-90);
-                        s.build_arrays();
+                        s.rotateX(-90);
+                        s.buildArrays();
                         s.material.diffuse_material = ((i + j) % 2 == 0) ? color1 : color2;
                         s.material.specular_material = Vec3(0.2f, 0.2f, 0.2f);
                         s.material.shininess = 20;
@@ -343,8 +326,8 @@ public:
                     s.setQuad(Vec3(-1., -1., 0.), Vec3(1., 0, 0.), Vec3(0., 1, 0.), 2., 2.);
                     s.translate(Vec3(0., 0., -2.));
                     s.scale(Vec3(2., 2., 1.));
-                    s.rotate_x(-90);
-                    s.build_arrays();
+                    s.rotateX(-90);
+                    s.buildArrays();
                     s.material.diffuse_material = Vec3(1.0, 1.0, 1.0);
                     s.material.specular_material = Vec3(0.5, 0.5, 0.5);
                     s.material.shininess = 16;
@@ -356,8 +339,8 @@ public:
             s.setQuad(Vec3(-1., -1., 0.), Vec3(1., 0, 0.), Vec3(0., 1, 0.), 2., 2.);
             s.translate(Vec3(0., 0., -2.));
             s.scale(Vec3(2., 2., 1.));
-            s.rotate_x(90);
-            s.build_arrays();
+            s.rotateX(90);
+            s.buildArrays();
             s.material.diffuse_material = Vec3(1.0, 1.0, 1.0);
             s.material.specular_material = Vec3(1.0, 1.0, 1.0) * 0.2f;
             s.material.shininess = 16;
@@ -368,8 +351,8 @@ public:
             s.setQuad(Vec3(-1., -1., 0.), Vec3(1., 0, 0.), Vec3(0., 1, 0.), 2., 2.);
             s.translate(Vec3(0., 0., -2.));
             s.scale(Vec3(2., 2., 1.));
-            s.rotate_y(180);
-            s.build_arrays();
+            s.rotateY(180);
+            s.buildArrays();
             s.material.diffuse_material = Vec3(1.0, 1.0, 1.0);
             s.material.specular_material = Vec3(0.05, 0.05, 0.05);
             s.material.shininess = 5;
@@ -379,7 +362,7 @@ public:
             Sphere &s = spheres[spheres.size() - 1];
             s.m_center = Vec3(1.0, -1.25, 0.5);
             s.m_radius = 0.75f;
-            s.build_arrays();
+            s.buildArrays();
             s.material.type = Material_Glass;
             s.material.diffuse_material = Vec3(194.0f / 255.0f, 49.0f / 255.0f, 44.0f / 255.0f);
             s.material.specular_material = Vec3(194.0f / 255.0f, 49.0f / 255.0f, 44.0f / 255.0f);
@@ -392,7 +375,7 @@ public:
             Sphere &s = spheres[spheres.size() - 1];
             s.m_center = Vec3(-1.0, -1.25, -0.5);
             s.m_radius = 0.75f;
-            s.build_arrays();
+            s.buildArrays();
             s.material.type = Material_Mirror;
             s.material.diffuse_material = Vec3(1., 1., 1.);
             s.material.specular_material = Vec3(1., 1., 1.);

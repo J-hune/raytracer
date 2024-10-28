@@ -1,4 +1,9 @@
 #include "PhotonMap.h"
+#include "Intersection.h"
+#include "Lighting.h"
+#include <utility>
+#include <cmath>
+#include <GL/gl.h>
 
 void PhotonMap::emitPhotons(const std::vector<Light> &lights, const std::vector<Sphere> &spheres, const std::vector<Square> &squares, const std::vector<Mesh> &meshes, int photons) {
     std::mt19937 rng(std::random_device{}());
@@ -11,7 +16,7 @@ void PhotonMap::emitPhotons(const std::vector<Light> &lights, const std::vector<
         }
 
         Photon photon;
-        photon.position = lights[0].pos; // Photon starts at the light position
+        photon.position = lights[0].position; // Photon starts at the light position
         photon.color = lights[0].material; // Photon color is the light color
         photon.direction = randomDirection(rng); // Random direction for the photon
 
