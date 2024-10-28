@@ -82,8 +82,8 @@ void Mesh::buildArrays() {
 
 // Implementations for building arrays (optimized)
 void Mesh::buildPositionsArray() {
-    positions_array.resize(vertices.size() * 3);
-    for (size_t v = 0; v < vertices.size(); ++v) {
+    positions_array.resize(3 * vertices.size());
+    for (unsigned int v = 0; v < vertices.size(); ++v) {
         positions_array[3 * v + 0] = vertices[v].position[0];
         positions_array[3 * v + 1] = vertices[v].position[1];
         positions_array[3 * v + 2] = vertices[v].position[2];
@@ -91,8 +91,8 @@ void Mesh::buildPositionsArray() {
 }
 
 void Mesh::buildNormalsArray() {
-    normals_array.resize(vertices.size() * 3);
-    for (size_t v = 0; v < vertices.size(); ++v) {
+    normals_array.resize(3 * vertices.size());
+    for (unsigned int v = 0; v < vertices.size(); ++v) {
         normals_array[3 * v + 0] = vertices[v].normal[0];
         normals_array[3 * v + 1] = vertices[v].normal[1];
         normals_array[3 * v + 2] = vertices[v].normal[2];
@@ -100,17 +100,17 @@ void Mesh::buildNormalsArray() {
 }
 
 void Mesh::buildUVsArray() {
-    uvs_array.resize(vertices.size() * 2);
-    for (size_t v = 0; v < vertices.size(); ++v) {
-        uvs_array[2 * v + 0] = vertices[v].u;
-        uvs_array[2 * v + 1] = vertices[v].v;
+    uvs_array.resize(2 * vertices.size());
+    for (unsigned int vert = 0; vert < vertices.size(); ++vert) {
+        uvs_array[2 * vert + 0] = vertices[vert].u;
+        uvs_array[2 * vert + 1] = vertices[vert].v;
     }
 }
 
 void Mesh::buildTrianglesArray() {
-    triangles_array.resize(triangles.size() * 3);
-    for (size_t t = 0; t < triangles.size(); ++t) {
-        triangles_array[3 * t + 1] = triangles[t].v[0];
+    triangles_array.resize(3 * triangles.size());
+    for (unsigned int t = 0; t < triangles.size(); ++t) {
+        triangles_array[3 * t + 0] = triangles[t].v[0];
         triangles_array[3 * t + 1] = triangles[t].v[1];
         triangles_array[3 * t + 2] = triangles[t].v[2];
     }
@@ -171,20 +171,26 @@ void Mesh::rotateZ(const float angle) {
 // Draw the mesh using OpenGL
 void Mesh::draw() const {
     if( triangles_array.size() == 0 ) return;
-    GLfloat material_color[4] = {material.diffuse_material[0],
-                                 material.diffuse_material[1],
-                                 material.diffuse_material[2],
-                                 1.0};
+    GLfloat material_color[4] = {
+        material.diffuse_material[0],
+        material.diffuse_material[1],
+        material.diffuse_material[2],
+        1.0
+    };
 
-    GLfloat material_specular[4] = {material.specular_material[0],
-                                    material.specular_material[1],
-                                    material.specular_material[2],
-                                    1.0};
+    GLfloat material_specular[4] = {
+        material.specular_material[0],
+        material.specular_material[1],
+        material.specular_material[2],
+        1.0
+    };
 
-    GLfloat material_ambient[4] = {material.ambient_material[0],
-                                   material.ambient_material[1],
-                                   material.ambient_material[2],
-                                   1.0};
+    GLfloat material_ambient[4] = {
+        material.ambient_material[0],
+        material.ambient_material[1],
+        material.ambient_material[2],
+        1.0
+    };
 
     glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, material_specular);
     glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, material_color);
@@ -198,15 +204,52 @@ void Mesh::draw() const {
     glDrawElements(GL_TRIANGLES, triangles_array.size(), GL_UNSIGNED_INT, (GLvoid*)(triangles_array.data()));
 }
 
-// Intersection with a ray (placeholder)
+// Intersection with a ray
 RayTriangleIntersection Mesh::intersect(const Ray& ray) const {
     RayTriangleIntersection closestIntersection;
-    closestIntersection.t = FLT_MAX;
     closestIntersection.intersectionExists = false;
-    closestIntersection.w0 = 0.0f;
-    closestIntersection.w1 = 0.0f;
-    closestIntersection.w2 = 0.0f;
-    closestIntersection.tIndex = -1;
-    // Implementation for ray-triangle intersection goes here
+    closestIntersection.t = FLT_MAX;
+
+    for (const auto& triangle : triangles) {
+        const Vec3& v0 = vertices[triangle.v[0]].position;
+        const Vec3& v1 = vertices[triangle.v[1]].position;
+        const Vec3& v2 = vertices[triangle.v[2]].position;
+
+        // Möller-Trumbore intersection algorithm
+        Vec3 edge1 = v1 - v0;
+        Vec3 edge2 = v2 - v0;
+        Vec3 h = Vec3::cross(ray.direction(), edge2);
+        const float a = Vec3::dot(edge1, h);
+
+        if (a > -1e-6 && a < 1e-6) {
+            continue; // This ray is parallel to this triangle.
+        }
+
+        const float f = 1.0f / a;
+        Vec3 s = ray.origin() - v0;
+        const float u = f * Vec3::dot(s, h);
+
+        if (u < 0.0 || u > 1.0) {
+            continue;
+        }
+
+        Vec3 q = Vec3::cross(s, edge1);
+        const float v = f * Vec3::dot(ray.direction(), q);
+
+        if (v < 0.0 || u + v > 1.0) {
+            continue;
+        }
+
+        // At this stage we can compute t to find out where the intersection point is on the line.
+        const float t = f * Vec3::dot(edge2, q);
+
+        if (t > 1e-6 && t < closestIntersection.t) { // ray intersection
+            closestIntersection.intersectionExists = true;
+            closestIntersection.t = t;
+            closestIntersection.intersection = ray.origin() + ray.direction() * t;
+            closestIntersection.normal = Vec3::cross(edge1, edge2).normalized();
+        }
+    }
+
     return closestIntersection;
 }
