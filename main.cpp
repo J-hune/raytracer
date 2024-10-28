@@ -210,7 +210,7 @@ void ray_trace_section(const int w, const int h, const unsigned int nsamples,
                     const float u = (static_cast<float>(x) + dist(rng)) / static_cast<float>(w);
                     const float v = (static_cast<float>(y) + dist(rng)) / static_cast<float>(h);
 
-                    screen_space_to_world_space_ray(u, v, pos, dir);
+                    screenSpaceToWorldSpaceRay(u, v, pos, dir);
                     const Vec3 color = scenes[selected_scene].rayTrace(Ray(pos, dir), rng);
                     image[x + y * w] += color;
                 }

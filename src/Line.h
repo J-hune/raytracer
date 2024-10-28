@@ -1,9 +1,9 @@
 #ifndef LINE_H
 #define LINE_H
 
+#include "Vec3.h"
 #include <cmath>
 #include <iostream>
-#include "Vec3.h"
 
 class Line {
 private:

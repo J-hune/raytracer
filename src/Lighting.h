@@ -1,12 +1,9 @@
 #ifndef LIGHTING_H
 #define LIGHTING_H
 
-#include <random>
-#include <bits/stl_algo.h>
-
 #include "Vec3.h"
-#include "Material.h"
 #include "Light.h"
+#include <random>
 
 class Lighting {
 public:

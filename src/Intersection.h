@@ -6,6 +6,7 @@
 #include "Mesh.h"
 #include "Sphere.h"
 #include "Square.h"
+#include <cfloat>
 
 struct RaySceneIntersection {
     bool intersectionExists;
