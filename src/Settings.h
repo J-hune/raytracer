@@ -23,7 +23,7 @@ public:
     mutable int shadowRays = 16;
     int photons = 20000;
     bool caustics = true;
-    bool drawDebugPhotons = false;
+    mutable bool drawDebugPhotons = false;
     TypeOfFloor floorType = CHECKERBOARD;
 
 private:
