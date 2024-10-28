@@ -75,6 +75,7 @@ void printUsage() {
         << "  p   : Quick Render" << endl
         << "  r   : Render Render" << endl
         << "  +   : Switch Scene" << endl
+        << "  d   : Debug draw mode" << endl
         << endl
         << "Mouse Controls:" << endl
         << "---------------" << endl
@@ -348,6 +349,9 @@ void keyboard(const unsigned char key, int _x, int _y) {
                 glutFullScreen();
                 fullScreen = true;
             }
+            break;
+        case 'd':
+            settings.drawDebugPhotons = !settings.drawDebugPhotons;
             break;
         case 'q':
         case 27:
