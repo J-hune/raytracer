@@ -1,4 +1,4 @@
-#include "Intersection.h"
+#include "../include/Intersection.h"
 #include <cfloat>
 
 RaySceneIntersection Intersection::computeIntersection(const Ray &ray, const std::vector<Sphere> &spheres, const std::vector<Square> &squares, const std::vector<Mesh> &meshes, float z_near) {

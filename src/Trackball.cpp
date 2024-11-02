@@ -55,7 +55,7 @@
 #endif
 #include <cmath>
 #include <algorithm>
-#include "Trackball.h"
+#include "../include/Trackball.h"
 
 /*
  * This size should really be based on the distance from the center of

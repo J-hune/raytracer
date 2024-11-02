@@ -1,6 +1,6 @@
-#include "PhotonMap.h"
-#include "Intersection.h"
-#include "Lighting.h"
+#include "../include/PhotonMap.h"
+#include "../include/Intersection.h"
+#include "../include/Lighting.h"
 #include <cmath>
 #include <thread>
 #include <utility>
@@ -44,8 +44,8 @@ void PhotonMap::emitPhotons(
         thread.join();
     }
 
-    mirrorPhotonTree = PhotonKDTree(mirrorPhotons);
-    glassPhotonTree = PhotonKDTree(glassPhotons);
+    mirrorPhotonTree = KDTree(mirrorPhotons);
+    glassPhotonTree = KDTree(glassPhotons);
 }
 
 void PhotonMap::emitPhotonsForThread(

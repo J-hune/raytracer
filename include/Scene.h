@@ -9,7 +9,7 @@
 #include "Sphere.h"
 #include "Square.h"
 #include "Light.h"
-#include "PhotonKDTree.h"
+#include "KDTree.h"
 #include "Settings.h"
 #include "Intersection.h"
 #include "Lighting.h"
@@ -250,7 +250,7 @@ public:
         directIlluminationReinhardKey = 0.9f;
         causticsReinhardKey = 0.0002f;
         setup_cornell_box();
-        addMesh("data/epcot.off", Vec3(0.0, -0.4, 0.0), Material_Mirror, Vec3(0.f), Vec3(1.f), 16, 0.0, 1.5);
+        addMesh("../data/epcot.off", Vec3(0.0, -0.4, 0.0), Material_Mirror, Vec3(0.f), Vec3(1.f), 16, 0.0, 1.5);
     }
 
 
