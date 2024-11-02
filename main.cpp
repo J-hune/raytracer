@@ -326,6 +326,11 @@ void ray_trace_from_camera(const Settings &settings) {
     }
 
     f << "P3\n" << w << " " << h << "\n255\n";
+    f << "# Render time: " << time_str << "\n";
+    f << "# Render duration: " << static_cast<float>(duration.count()) / 1000.f << " seconds\n";
+    f << "# Samples per pixel: " << settings.samples << "\n";
+    f << "# Shadow rays: " << settings.shadowRays << "\n";
+    f << "# Photons: " << settings.photons << "\n";
     for (const auto &pixel: image) {
         f << static_cast<int>(255.f * std::min(1.f, pixel[0])) << " "
           << static_cast<int>(255.f * std::min(1.f, pixel[1])) << " "
