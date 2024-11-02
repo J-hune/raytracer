@@ -13,20 +13,18 @@
 
 class PhotonMap {
 public:
-    PhotonKDTree photonGlassTree;
-    PhotonKDTree photonMirrorTree;
-    PhotonKDTree photonDiffuseTree;
+    PhotonKDTree mirrorPhotonTree;
+    PhotonKDTree glassPhotonTree;
 
     void emitPhotons(const std::vector<Light> &lights, const std::vector<Sphere> &spheres, const std::vector<Square> &squares, const std::vector<Mesh> &meshes, int photons);
-    [[nodiscard]] Vec3 renderCaustics(const Vec3 &position, const Vec3 &normal, const Material &material) const;
-    [[nodiscard]] std::vector<Photon> findNearestGlassPhotons(const Vec3 &point, float maxDistance) const;
-    [[nodiscard]] std::vector<Photon> findNearestMirrorPhotons(const Vec3 &point, float maxDistance) const;
-    [[nodiscard]] std::vector<Photon> findNearestDiffusePhotons(const Vec3 &point, float maxDistance) const;
+    [[nodiscard]] Vec3 computeCaustics(const Vec3 &position, const Material &material) const;
     void debugDrawPhotons() const;
 
 private:
     static Vec3 randomDirection(std::mt19937 &rng);
-    static Vec3 calculateCausticsContribution(std::vector<Photon> &photons, const Vec3 &position, const Vec3 &normal, const Material &material, float maxRadius, float sigma) ;
+    static Photon createInitialPhoton(const std::vector<Light> &lights, std::mt19937 &rng);
+    static void processGlassPhoton(Photon &photon, const Vec3 &normal, const Material &material, std::vector<Photon> &photons);
+    static void processMirrorPhoton(Photon &photon, const Vec3 &normal, const Material &material);
 };
 
 #endif //PHOTONMAP_H

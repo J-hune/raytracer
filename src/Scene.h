@@ -36,20 +36,66 @@ public:
         if (settings.drawDebugPhotons) photonMap.debugDrawPhotons();
     }
 
+    Vec3 rayTrace(Ray const &rayStart, std::mt19937 &rng) {
+        const Settings &settings = Settings::getInstance();
+
+        // Call the recursive function with the single ray and 10 bounces
+        return rayTraceRecursive(rayStart, 10, settings, rng, 4.8f);
+    }
+
     // Recursive ray tracing function
     Vec3 rayTraceRecursive(const Ray &ray, const int NRemainingBounces, const Settings &settings, std::mt19937 &rng, const float z_near = 0.0f) {
         Vec3 color(0.0f, 0.0f, 0.0f);
-        const Vec3 ambientLight(0.1f, 0.1f, 0.1f); // Ambient light
+
+        auto reinhardToneMapping = [](const Vec3 &pixelColor, const float keyValue) -> Vec3 {
+            Vec3 mappedColor;
+            for (int i = 0; i < 3; ++i) {
+                mappedColor[i] = (pixelColor[i] * keyValue) / (pixelColor[i] * keyValue + 1.0f);
+            }
+            return mappedColor;
+        };
 
         // Compute the intersection with the scene (ray vs. (spheres, squares, meshes))
         const RaySceneIntersection intersection = Intersection::computeIntersection(ray, spheres, squares, meshes, z_near);
 
         // If there isn't any intersection, return the background color
-        if (!intersection.intersectionExists || NRemainingBounces == 0) {
-            return color;
+        if (!intersection.intersectionExists) {
+            return color; // Background color
         }
 
         auto [intersectionPoint, normal, material] = Intersection::parseIntersection(intersection, spheres, squares, meshes);
+
+        // Add direct illumination
+        if (settings.directIllumination && material.type == Material_Diffuse_Blinn_Phong) {
+            const Vec3 directIlluminationColor = computeDirectIllumination(ray, intersectionPoint, normal, material, settings, rng);
+            color += reinhardToneMapping(directIlluminationColor, 0.9f);
+        }
+
+        // Add caustics effect
+        if (settings.caustics) {
+            const Vec3 causticsColor = photonMap.computeCaustics(intersectionPoint, material);
+
+            // Tone mapping
+            color += reinhardToneMapping(causticsColor, 0.001f);
+        }
+
+        // Add reflection
+        if (NRemainingBounces > 0 && settings.reflections) {
+            const Vec3 reflectionColor = computeReflection(ray, intersectionPoint, normal, material, NRemainingBounces, settings, rng);
+            color += reflectionColor;
+        }
+
+        // Add refraction
+        if (NRemainingBounces > 0 && settings.refractions) {
+            color += computeRefraction(ray, intersectionPoint, normal, material, NRemainingBounces, settings, rng);
+        }
+
+        return color; // Return the accumulated color
+    }
+
+    Vec3 computeDirectIllumination(const Ray &ray, const Vec3 &intersectionPoint, const Vec3 &normal, const Material &material, const Settings &settings, std::mt19937 &rng) {
+        Vec3 color(0.0f, 0.0f, 0.0f);
+        const Vec3 ambientLight(0.1f, 0.1f, 0.1f); // Ambient light
 
         // Add the ambient light to the color
         color += Vec3::compProduct(material.ambient_material, ambientLight);
@@ -60,95 +106,101 @@ public:
 
         // For each light in the scene
         for (const auto &light: lights) {
-            constexpr float epsilon = 1e-5f;
-            Vec3 lightDir = (light.position - intersectionPoint).normalize();;
-            float lightDistance = lightDir.length();
-
-            // If the light is spherical (point light) => hard shadows
             if (light.type == LightType_Spherical) {
-                // Ray to test the shadow
-                Ray shadowRay(intersectionPoint + normal * epsilon, lightDir);
-                RaySceneIntersection shadowIntersection = Intersection::computeIntersection(shadowRay, spheres, squares, meshes, epsilon);
-
-                // If the point is in shadow, skip the light
-                if (shadowIntersection.intersectionExists && shadowIntersection.t < lightDistance) {
-                    continue; // The point is in shadow.
-                }
-
-                color += Lighting::computePhongComponents(lightDir, viewDir, normal, material, light);
-            }
-
-            // If the light is a quad (area light) => soft shadows
-            else if (light.type == LightType_Quad) {
-                float shadowFactor = 0.0f;
-                const float threshold = static_cast<float>(settings.shadowRays) * 0.9f;
-
-                // Sampling for soft shadows
-                for (int i = 0; i < settings.shadowRays; ++i) {
-                    Vec3 samplePoint = Lighting::samplePointOnQuad(light, rng);
-                    Vec3 shadowDir = (samplePoint - intersectionPoint).normalize();
-                    float shadowDistance = shadowDir.length();
-
-                    // Ray to test the shadow
-                    Ray shadowRay(intersectionPoint + normal * epsilon, shadowDir);
-                    RaySceneIntersection shadowIntersection = Intersection::computeIntersection(shadowRay, spheres, squares, meshes, epsilon);
-
-                    // If the point is in shadow, increment the shadow factor
-                    // If the shadow factor is too high, skip the light
-                    if (shadowIntersection.intersectionExists && shadowIntersection.t < shadowDistance) {
-                        shadowFactor += 1.0f;
-                        if (shadowFactor >= threshold) break; // Early exit if too much shadow
-                    }
-                }
-
-                float lightVisibility = 1.0f - shadowFactor / static_cast<float>(settings.shadowRays);
-                if (lightVisibility > 0.0f) {
-                    color += Lighting::computePhongComponents(lightDir, viewDir, normal, material, light) * lightVisibility;
-                }
+                color += computeSphericalLight(intersectionPoint, normal, material, light, viewDir, settings);
+            } else if (light.type == LightType_Quad) {
+                color += computeQuadLight(intersectionPoint, normal, material, light, viewDir, settings, rng);
             }
         }
 
-        // Add caustics effect
-        if (settings.caustics) {
-            color += photonMap.renderCaustics(intersectionPoint, normal, material);
+        return color;
+    }
+
+    [[nodiscard]] Vec3 computeSphericalLight(const Vec3 &intersectionPoint, const Vec3 &normal, const Material &material, const Light &light, const Vec3 &viewDir, const Settings &settings) const {
+        constexpr float epsilon = 1e-5f;
+        const Vec3 lightDir = (light.position - intersectionPoint).normalize();
+        const float lightDistance = lightDir.length();
+
+        // Ray to test the shadow
+        const Ray shadowRay(intersectionPoint + normal * epsilon, lightDir);
+        const RaySceneIntersection shadowIntersection = Intersection::computeIntersection(shadowRay, spheres, squares, meshes, epsilon);
+
+        // If the point is in shadow, skip the light
+        if (shadowIntersection.intersectionExists && shadowIntersection.t < lightDistance) {
+            return Vec3(0.0f); // No contribution
         }
 
-        Vec3 rayDirection = ray.direction();
-        rayDirection.normalize();
-        const Vec3 reflectedDirection = Lighting::computeReflectedDirection(rayDirection, normal).normalize();
-        const Vec3 bias = (Vec3::dot(ray.direction(), normal) < 0) ? normal * 1e-5f : -normal * 1e-5f;
+        return Lighting::computePhongComponents(lightDir, viewDir, normal, material, light);
+    }
 
-        // If there are remaining bounces, compute the reflected ray
-        if (material.type == Material_Mirror && NRemainingBounces > 0) {
+    Vec3 computeQuadLight(const Vec3 &intersectionPoint, const Vec3 &normal, const Material &material, const Light &light, const Vec3 &viewDir, const Settings &settings, std::mt19937 &rng) const {
+        Vec3 color(0.0f);
+        float shadowFactor = 0.0f;
+        const float threshold = static_cast<float>(settings.shadowRays) * 0.9f;
+        constexpr float epsilon = 1e-5f;
+        const Vec3 lightDir = (light.position - intersectionPoint).normalize();
+
+        // Sampling for soft shadows
+        for (int i = 0; i < settings.shadowRays; ++i) {
+            Vec3 samplePoint = Lighting::samplePointOnQuad(light, rng);
+            Vec3 shadowDir = (samplePoint - intersectionPoint).normalize();
+            const float shadowDistance = shadowDir.length();
+
+            // Ray to test the shadow
+            Ray shadowRay(intersectionPoint + normal * epsilon, shadowDir);
+            const RaySceneIntersection shadowIntersection = Intersection::computeIntersection(
+                shadowRay, spheres, squares, meshes, epsilon);
+
+            // If the point is in shadow, increment the shadow factor
+            if (shadowIntersection.intersectionExists && shadowIntersection.t < shadowDistance) {
+                shadowFactor += 1.0f;
+                if (shadowFactor >= threshold) break; // Early exit if too much shadow
+            }
+        }
+
+        const float lightVisibility = 1.0f - shadowFactor / static_cast<float>(settings.shadowRays);
+        if (lightVisibility > 0.0f) {
+            color += Lighting::computePhongComponents(lightDir, viewDir, normal, material, light) * lightVisibility;
+        }
+
+        return color;
+    }
+
+    Vec3 computeReflection(const Ray &ray, const Vec3 &intersectionPoint, const Vec3 &normal, const Material &material, const int NRemainingBounces, const Settings &settings, std::mt19937 &rng) {
+        Vec3 color(0.0f);
+
+        if (material.type == Material_Mirror) {
+            const Vec3 reflectedDirection = Lighting::computeReflectedDirection(ray.direction(), normal).normalize();
+            const Vec3 bias = (Vec3::dot(ray.direction(), normal) < 0) ? normal * 1e-5f : -normal * 1e-5f;
             const Ray reflectedRay(intersectionPoint + bias, reflectedDirection);
-            return rayTraceRecursive(reflectedRay, NRemainingBounces - 1, settings, rng);
+            color += rayTraceRecursive(reflectedRay, NRemainingBounces - 1, settings, rng);
         }
 
-        // If the material is glass, compute the refracted ray
-        if (material.type == Material_Glass && NRemainingBounces > 0) {
-            float eta = material.index_medium;
-            Vec3 refractedDirection = Lighting::computeRefractedDirection(rayDirection, normal, eta).normalize();
+        return color; // Return the accumulated reflection color
+    }
+
+    Vec3 computeRefraction(const Ray &ray, const Vec3 &intersectionPoint, const Vec3 &normal, const Material &material, const int NRemainingBounces, const Settings &settings, std::mt19937 &rng) {
+        Vec3 color(0.0f);
+
+        if (material.type == Material_Glass) {
+            const float eta = material.index_medium;
+            const Vec3 refractedDirection = Lighting::computeRefractedDirection(ray.direction(), normal, eta).normalize();
+            const Vec3 reflectedDirection = Lighting::computeReflectedDirection(ray.direction(), normal).normalize();
+            const Vec3 bias = (Vec3::dot(ray.direction(), normal) < 0) ? normal * 1e-5f : -normal * 1e-5f;
             const Ray refractedRay(intersectionPoint - bias, refractedDirection);
 
             // Compute Fresnel effect
-            float fresnelEffect = Lighting::computeFresnelEffect(rayDirection, normal, eta);
+            const float fresnelEffect = Lighting::computeFresnelEffect(ray.direction(), normal, eta);
 
             // Trace both reflected and refracted rays
-            Vec3 reflectedColor = rayTraceRecursive(Ray(intersectionPoint + bias, reflectedDirection), NRemainingBounces - 1, settings, rng);
-            Vec3 refractedColor = rayTraceRecursive(refractedRay, NRemainingBounces - 1, settings, rng);
+            const Vec3 reflectedColor = rayTraceRecursive(Ray(intersectionPoint + bias, reflectedDirection), NRemainingBounces - 1, settings, rng);
+            const Vec3 refractedColor = rayTraceRecursive(refractedRay, NRemainingBounces - 1, settings, rng);
 
             // Combine the colors based on the Fresnel effect
-            return reflectedColor * fresnelEffect + refractedColor * (1.0f - fresnelEffect);
+            color += reflectedColor * fresnelEffect + refractedColor * (1.0f - fresnelEffect);
         }
 
-        return color; // Return the accumulated color
-    }
-
-    Vec3 rayTrace(Ray const &rayStart, std::mt19937 &rng) {
-        const Settings &settings = Settings::getInstance();
-
-        // Call the recursive function with the single ray and 1 bounce
-        return rayTraceRecursive(rayStart, 5, settings, rng, 4.8f);
+        return color; // Return the accumulated refraction color
     }
 
     static Vec3 randomDirection(std::mt19937 &rng) {
@@ -306,7 +358,7 @@ public:
                     for (int j = 0; j < numSquares; ++j) {
                         Square &s = squares[squares.size() - numSquares * (i + 1) + j];
                         s.setQuad(
-                            Vec3(-1 + j * squareSize, -1 + i * squareSize, 0.),
+                            Vec3(-1 + static_cast<float>(j) * squareSize, -1 + static_cast<float>(i) * squareSize, 0.),
                             Vec3(squareSize, 0, 0),
                             Vec3(0, squareSize, 0),
                             squareSize, squareSize
@@ -364,8 +416,8 @@ public:
             s.m_radius = 0.75f;
             s.buildArrays();
             s.material.type = Material_Glass;
-            s.material.diffuse_material = Vec3(194.0f / 255.0f, 49.0f / 255.0f, 44.0f / 255.0f);
-            s.material.specular_material = Vec3(194.0f / 255.0f, 49.0f / 255.0f, 44.0f / 255.0f);
+            s.material.diffuse_material = Vec3(0.f);
+            s.material.specular_material = Vec3(1.f);
             s.material.shininess = 16;
             s.material.transparency = 1.0;
             s.material.index_medium = 1.5;
@@ -377,14 +429,15 @@ public:
             s.m_radius = 0.75f;
             s.buildArrays();
             s.material.type = Material_Mirror;
-            s.material.diffuse_material = Vec3(1., 1., 1.);
-            s.material.specular_material = Vec3(1., 1., 1.);
+            s.material.diffuse_material = Vec3(0.f);
+            s.material.specular_material = Vec3(1.f);
             s.material.shininess = 16;
             s.material.transparency = 0.;
             s.material.index_medium = 0.;
         }
 
         if (settings.caustics) {
+            std::cout << "Emitting photons, the application will freeze for a few seconds..." << std::endl;
             photonMap.emitPhotons(lights, spheres, squares, meshes, settings.photons);
         }
     }
