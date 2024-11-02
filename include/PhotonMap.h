@@ -4,17 +4,17 @@
 #include <vector>
 #include <random>
 
-
-#include "PhotonKDTree.h"
-#include "Light.h"
-#include "Sphere.h"
-#include "Square.h"
-#include "Mesh.h"
+#include "../include/KDTree.h"
+#include "../include/Light.h"
+#include "../include/Photon.h"
+#include "../include/Sphere.h"
+#include "../include/Square.h"
+#include "../include/Mesh.h"
 
 class PhotonMap {
 public:
-    PhotonKDTree mirrorPhotonTree;
-    PhotonKDTree glassPhotonTree;
+    KDTree<Photon> mirrorPhotonTree;
+    KDTree<Photon> glassPhotonTree;
 
     void emitPhotons(const std::vector<Light> &lights, const std::vector<Sphere> &spheres, const std::vector<Square> &squares, const std::vector<Mesh> &meshes, int photons);
     [[nodiscard]] Vec3 computeCaustics(const Vec3 &position, const Material &material) const;

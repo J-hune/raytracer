@@ -1,5 +1,5 @@
-#include "Lighting.h"
-#include "Material.h"
+#include "../include/Lighting.h"
+#include "../include/Material.h"
 #include <algorithm>
 
 Vec3 Lighting::computePhongComponents(const Vec3 &lightDir, const Vec3 &viewDir, const Vec3 &normal, const Material &material, const Light &light) {

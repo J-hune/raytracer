@@ -1,4 +1,4 @@
-#include "Mesh.h"
+#include "../include/Mesh.h"
 
 #include <cfloat>
 #include <cmath>

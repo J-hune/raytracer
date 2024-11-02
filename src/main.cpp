@@ -13,14 +13,14 @@
 #include <filesystem>
 #include <queue>
 #include <random>
-
-#include "src/Vec3.h"
-#include "src/Camera.h"
-#include "src/Scene.h"
-#include "src/Settings.h"
 #include <GL/glut.h>
 
-#include "src/matrixUtilities.h"
+#include "../include/Vec3.h"
+#include "../include/Camera.h"
+#include "../include/Scene.h"
+#include "../include/Settings.h"
+#include "../include/matrixUtilities.h"
+
 
 using namespace std;
 
@@ -254,7 +254,7 @@ void ray_trace_section(const int w, const int h, const unsigned int nsamples,
 
                 if (progress % 10 == 0) {
                     std::ostringstream partialFilename;
-                    partialFilename << "renders/render_partial.ppm";
+                    partialFilename << "../renders/render_partial.ppm";
                     export_partial_image(image, w, h, partialFilename.str());
                 }
             }

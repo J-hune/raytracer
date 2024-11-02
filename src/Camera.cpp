@@ -1,5 +1,5 @@
-#include "Camera.h"
-#include "Trackball.h"
+#include "../include/Camera.h"
+#include "../include/Trackball.h"
 #include <GL/gl.h>
 #include <GL/glu.h>
 
