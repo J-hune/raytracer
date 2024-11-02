@@ -1,4 +1,5 @@
 #include "../include/Mesh.h"
+#include "../include/Triangle.h"
 
 #include <cfloat>
 #include <cmath>
@@ -32,6 +33,9 @@ void Mesh::loadOFF(const std::string& filename) {
         }
     }
     in.close();
+
+    // Compute AABB of the mesh
+    computeAABB();
 }
 
 // Recompute normals for each vertex
@@ -170,22 +174,22 @@ void Mesh::rotateZ(const float angle) {
 
 // Draw the mesh using OpenGL
 void Mesh::draw() const {
-    if( triangles_array.size() == 0 ) return;
-    GLfloat material_color[4] = {
+    if (triangles_array.empty()) return;
+    const GLfloat material_color[4] = {
         material.diffuse_material[0],
         material.diffuse_material[1],
         material.diffuse_material[2],
         1.0
     };
 
-    GLfloat material_specular[4] = {
+    const GLfloat material_specular[4] = {
         material.specular_material[0],
         material.specular_material[1],
         material.specular_material[2],
         1.0
     };
 
-    GLfloat material_ambient[4] = {
+    const GLfloat material_ambient[4] = {
         material.ambient_material[0],
         material.ambient_material[1],
         material.ambient_material[2],
@@ -204,50 +208,56 @@ void Mesh::draw() const {
     glDrawElements(GL_TRIANGLES, triangles_array.size(), GL_UNSIGNED_INT, (GLvoid*)(triangles_array.data()));
 }
 
-// Intersection with a ray
-RayTriangleIntersection Mesh::intersect(const Ray& ray) const {
-    RayTriangleIntersection closestIntersection;
+void Mesh::computeAABB() {
+    Vec3 min = vertices[0].position;
+    Vec3 max = vertices[0].position;
+
+    for (const auto& vertex : vertices) {
+        for (int i = 0; i < 3; ++i) {
+            if (vertex.position[i] < min[i]) min[i] = vertex.position[i];
+            if (vertex.position[i] > max[i]) max[i] = vertex.position[i];
+        }
+    }
+
+    aabb = AABB(min, max);
+}
+
+[[nodiscard]]
+bool Mesh::intersectAABB(const Ray& ray) const {
+    float tmin = (aabb.min[0] - ray.origin()[0]) / ray.direction()[0];
+    float tmax = (aabb.max[0] - ray.origin()[0]) / ray.direction()[0];
+
+    if (tmin > tmax) std::swap(tmin, tmax);
+
+    for (int i = 1; i < 3; ++i) {
+        float t1 = (aabb.min[i] - ray.origin()[i]) / ray.direction()[i];
+        float t2 = (aabb.max[i] - ray.origin()[i]) / ray.direction()[i];
+
+        if (t1 > t2) std::swap(t1, t2);
+
+        tmin = std::max(tmin, t1);
+        tmax = std::min(tmax, t2);
+
+        if (tmin > tmax) return false;
+    }
+
+    return true;
+}
+
+RayIntersection Mesh::intersect(const Ray& ray) const {
+    RayIntersection closestIntersection;
     closestIntersection.intersectionExists = false;
     closestIntersection.t = FLT_MAX;
 
     for (const auto& triangle : triangles) {
-        const Vec3& v0 = vertices[triangle.v[0]].position;
-        const Vec3& v1 = vertices[triangle.v[1]].position;
-        const Vec3& v2 = vertices[triangle.v[2]].position;
+        Triangle tri(vertices[triangle.v[0]].position, vertices[triangle.v[1]].position, vertices[triangle.v[2]].position);
+        const RayTriangleIntersection intersection = tri.intersect(ray);
 
-        // Möller-Trumbore intersection algorithm
-        Vec3 edge1 = v1 - v0;
-        Vec3 edge2 = v2 - v0;
-        Vec3 h = Vec3::cross(ray.direction(), edge2);
-        const float a = Vec3::dot(edge1, h);
-
-        if (a > -1e-6 && a < 1e-6) {
-            continue; // This ray is parallel to this triangle.
-        }
-
-        const float f = 1.0f / a;
-        Vec3 s = ray.origin() - v0;
-        const float u = f * Vec3::dot(s, h);
-
-        if (u < 0.0 || u > 1.0) {
-            continue;
-        }
-
-        Vec3 q = Vec3::cross(s, edge1);
-        const float v = f * Vec3::dot(ray.direction(), q);
-
-        if (v < 0.0 || u + v > 1.0) {
-            continue;
-        }
-
-        // At this stage we can compute t to find out where the intersection point is on the line.
-        const float t = f * Vec3::dot(edge2, q);
-
-        if (t > 1e-6 && t < closestIntersection.t) { // ray intersection
+        if (intersection.intersectionExists && intersection.t < closestIntersection.t) {
             closestIntersection.intersectionExists = true;
-            closestIntersection.t = t;
-            closestIntersection.intersection = ray.origin() + ray.direction() * t;
-            closestIntersection.normal = Vec3::cross(edge1, edge2).normalized();
+            closestIntersection.t = intersection.t;
+            closestIntersection.intersection = intersection.intersection;
+            closestIntersection.normal = intersection.normal;
         }
     }
 

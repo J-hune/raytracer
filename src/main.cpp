@@ -254,7 +254,7 @@ void ray_trace_section(const int w, const int h, const unsigned int nsamples,
 
                 if (progress % 10 == 0) {
                     std::ostringstream partialFilename;
-                    partialFilename << "../renders/render_partial.ppm";
+                    partialFilename << "renders/render_partial.ppm";
                     export_partial_image(image, w, h, partialFilename.str());
                 }
             }

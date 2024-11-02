@@ -6,6 +6,7 @@
 #include "Mesh.h"
 #include "Sphere.h"
 #include "Square.h"
+#include "Triangle.h"
 #include <cfloat>
 
 struct RaySceneIntersection {
@@ -17,7 +18,7 @@ struct RaySceneIntersection {
     RaySphereIntersection raySphereIntersection;
     RaySquareIntersection raySquareIntersection;
 
-    RaySceneIntersection() : intersectionExists(false), t(FLT_MAX), rayMeshIntersection(), raySquareIntersection() {}
+    RaySceneIntersection() : intersectionExists(false), t(FLT_MAX) {}
 };
 
 class Intersection {
