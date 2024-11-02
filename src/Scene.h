@@ -24,6 +24,7 @@ class Scene {
     bool photonsEmitted = false;
     float directIlluminationReinhardKey = 0.0f;
     float causticsReinhardKey = 0.0f;
+    bool drawCaustics = true;
 
 public:
     Scene() = default;
@@ -37,7 +38,7 @@ public:
         for (const auto &square: squares) square.draw();
 
         if (settings.drawDebugPhotons) photonMap.debugDrawPhotons();
-        if (!photonsEmitted && settings.caustics) {
+        if (!photonsEmitted && settings.caustics && drawCaustics) {
             std::cout << "Emitting photons, the application will freeze for a few seconds..." << std::endl;
             photonMap.emitPhotons(lights, spheres, squares, meshes, settings.photons);
             photonsEmitted = true;
@@ -218,10 +219,7 @@ public:
 
     // Scene 1
     void setup_single_sphere() {
-        meshes.clear();
-        spheres.clear();
-        squares.clear();
-        lights.clear();
+        drawCaustics = false;
         const Light light(Vec3(-5, 5, 5), LightType_Spherical, Vec3(1, 1, 1), 2.5f, 2.f, false);
         lights.push_back(light);
         {
@@ -230,7 +228,7 @@ public:
             s.m_center = Vec3(0., 0., 0.);
             s.m_radius = 1.f;
             s.buildArrays();
-            s.material.type = Material_Mirror;
+            s.material.type = Material_Diffuse_Blinn_Phong;
             s.material.diffuse_material = Vec3(0.811, 0.031, 0.129);
             s.material.specular_material = Vec3(0.2, 0.2, 0.2);
             s.material.shininess = 20;
@@ -239,10 +237,7 @@ public:
 
     // Scene 2
     void setup_multiple_spheres() {
-        meshes.clear();
-        spheres.clear();
-        squares.clear();
-        lights.clear();
+        drawCaustics = false;
         const Light light(Vec3(-5, 5, 5), LightType_Spherical, Vec3(1, 1, 1), 1.5f, 2.f, false);
         lights.push_back(light);
         {
@@ -251,7 +246,7 @@ public:
             s.m_center = Vec3(1., 0., 0.);
             s.m_radius = 1.f;
             s.buildArrays();
-            s.material.type = Material_Mirror;
+            s.material.type = Material_Diffuse_Blinn_Phong;
             s.material.diffuse_material = Vec3(0.811, 0.031, 0.129);
             s.material.specular_material = Vec3(0.2, 0.2, 0.2);
             s.material.shininess = 20;
@@ -261,7 +256,7 @@ public:
             s.m_center = Vec3(-1., 0., 0.);
             s.m_radius = 1.f;
             s.buildArrays();
-            s.material.type = Material_Mirror;
+            s.material.type = Material_Diffuse_Blinn_Phong;
             s.material.diffuse_material = Vec3(0.129, 0.811, 0.031);
             s.material.specular_material = Vec3(0.2, 0.2, 0.2);
             s.material.shininess = 20;
@@ -270,10 +265,7 @@ public:
 
     // Scene 3
     void setup_single_square() {
-        meshes.clear();
-        spheres.clear();
-        squares.clear();
-        lights.clear();
+        drawCaustics = false;
         const Light light(Vec3(-5, 5, 5), LightType_Spherical, Vec3(1, 1, 1), 2.5f, 2.f, false);
         lights.push_back(light);
         {
@@ -281,6 +273,7 @@ public:
             Square &s = squares[squares.size() - 1];
             s.setQuad(Vec3(-1., -1., 0.), Vec3(1., 0, 0.), Vec3(0., 1, 0.), 2., 2.);
             s.buildArrays();
+            s.material.type = Material_Diffuse_Blinn_Phong;
             s.material.diffuse_material = Vec3(0.19, 0.40, 0.40); // Teal
             s.material.specular_material = Vec3(0.2, 0.2, 0.2);
             s.material.shininess = 20;
@@ -290,12 +283,8 @@ public:
     void setup_cornell_box() {
         const Settings &settings = Settings::getInstance();
         directIlluminationReinhardKey = 0.9f;
-        causticsReinhardKey = 0.0003f;
+        causticsReinhardKey = 0.0008f;
 
-        meshes.clear();
-        spheres.clear();
-        squares.clear();
-        lights.clear();
         const Light light(Vec3(0.0, 1.5, 0.0), LightType_Quad, Vec3(1, 1, 1), 2.5f, 2.f, false);
         light.quad = Mesh();
         light.quad.vertices.emplace_back(Vec3(-0.5, 1.5, -0.5), Vec3(0, -1, 0));
@@ -436,13 +425,9 @@ public:
 
     void setup_cornell_box_mesh() {
         const Settings &settings = Settings::getInstance();
-        directIlluminationReinhardKey = 0.f;
-        causticsReinhardKey = 0.02f;
+        directIlluminationReinhardKey = 0.9f;
+        causticsReinhardKey = 0.0002f;
 
-        meshes.clear();
-        spheres.clear();
-        squares.clear();
-        lights.clear();
         const Light light(Vec3(0.0, 1.5, 0.0), LightType_Quad, Vec3(1, 1, 1), 2.5f, 2.f, false);
         light.quad = Mesh();
         light.quad.vertices.emplace_back(Vec3(-0.5, 1.5, -0.5), Vec3(0, -1, 0));
@@ -559,7 +544,7 @@ public:
             m.loadOFF("data/epcot.off");
             m.translate(Vec3(0.0, -0.4, 0.0));
             m.buildArrays();
-            m.material.type = Material_Glass;
+            m.material.type = Material_Mirror;
             m.material.diffuse_material = Vec3(0.f);
             m.material.specular_material = Vec3(1.f);
             m.material.shininess = 16;

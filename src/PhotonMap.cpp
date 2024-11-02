@@ -175,19 +175,40 @@ void PhotonMap::processMirrorPhoton(Photon& photon, const Vec3& normal, const Ma
 /******************************************************************************************************************/
 
 Vec3 PhotonMap::computeCaustics(const Vec3 &position, const Material &material) const {
-    constexpr float maxMirrorDistance = 1.5f;
-    constexpr float maxGlassDistance = 0.2f;
+    // Define maximum search distances for mirror and glass photons
+    constexpr float maxMirrorDistance = 1.0f;
+    constexpr float maxGlassDistance = 0.3f;
 
-    std::vector<Photon> nearbyPhotons = mirrorPhotonTree.findNearestNeighbors(position, maxMirrorDistance);
-    std::vector<Photon> nearbyGlassPhotons = glassPhotonTree.findNearestNeighbors(position, maxGlassDistance);
+    // Initialize temporary search radii for expanding searches if not enough photons are found
+    float maxMirrorDistanceTemp = 0.05f;
+    float maxGlassDistanceTemp = 0.05f;
+
+    // Vectors to store nearby photons
+    std::vector<Photon> nearbyMirrorPhotons;
+    std::vector<Photon> nearbyGlassPhotons;
+
+    // Gradually increase the search radius until we find at least 5 nearby mirror photons or reach the max distance
+    while (nearbyMirrorPhotons.empty() && maxMirrorDistanceTemp < maxMirrorDistance) {
+        nearbyMirrorPhotons = mirrorPhotonTree.findNearestNeighbors(position, maxMirrorDistance);
+        maxMirrorDistanceTemp *= 1.05f;
+    }
+
+    // Gradually increase the search radius until we find at least 5 nearby glass photons or reach the max distance
+    while (nearbyGlassPhotons.empty() && maxGlassDistanceTemp < maxGlassDistance) {
+        nearbyGlassPhotons = glassPhotonTree.findNearestNeighbors(position, maxGlassDistance);
+        maxGlassDistanceTemp *= 1.05f;
+    }
 
     Vec3 illumination(0.0f);
-    if (nearbyPhotons.empty() && nearbyGlassPhotons.empty()) return illumination;
+    if (nearbyMirrorPhotons.empty() && nearbyGlassPhotons.empty()) return illumination;
 
-    for (const Photon &photon : nearbyPhotons) {
+
+    // Accumulate illumination from mirror photons by combining their color with the material's diffuse properties
+    for (const Photon &photon : nearbyMirrorPhotons) {
         illumination += Vec3::compProduct(photon.color, material.diffuse_material);
     }
 
+    // Accumulate illumination from glass photons similarly
     for (const Photon &photon : nearbyGlassPhotons) {
         illumination += Vec3::compProduct(photon.color, material.diffuse_material);
     }
