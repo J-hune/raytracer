@@ -276,7 +276,7 @@ void ray_trace_from_camera(const Settings &settings) {
     std::uniform_real_distribution<float> dist(0.0f, 1.0f);
 
     // Number of threads to use
-    unsigned int numThreads = std::thread::hardware_concurrency();
+    const unsigned int numThreads = std::thread::hardware_concurrency();
     std::vector<std::thread> threads;
     int totalRows = h;
     int bandHeight = 10;
@@ -468,7 +468,7 @@ int main(int argc, char **argv) {
     settings.height = 480;
     settings.samples = 80;
     settings.shadowRays = 16;
-    settings.photons = 500000;
+    settings.photons = 200000;
     settings.directIllumination = true;
     settings.caustics = true;
     settings.reflections = true;

@@ -39,4 +39,4 @@ src/*.o
 Thumbs.db
 
 # Ignore rendered images
-/rendus/
+/renders
