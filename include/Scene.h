@@ -234,13 +234,15 @@ public:
     void setup_single_square() {
         drawCaustics = false;
         addLight(Vec3(-5, 5, 5), LightType_Spherical, Vec3(1, 1, 1), 2.5f, 2.f);
-        addSquare(Vec3(-1., -1., 0.), Vec3(1., 0, 0.), Vec3(0., 1, 0.), 2., 2., Vec3(0., 0., -2.), 0,
+        addSquare(Vec3(-1., -1., 0.), Vec3(1., 0, 0.), Vec3(0., 1, 0.), 2., 2.,
                   Vec3(0.19, 0.40, 0.40), Vec3(0.2, 0.2, 0.2), 20);
     }
 
     void setup_cornell_box_with_2_spheres() {
         directIlluminationReinhardKey = 0.9f;
         causticsReinhardKey = 0.0008f;
+        // 500000 photons => 0.0003f
+
         setup_cornell_box();
         addSphere(Vec3(1.0, -1.25, 0.5), 0.75f, Material_Glass, Vec3(0.f), Vec3(1.f), 16, 1.0, 1.5);
         addSphere(Vec3(-1.0, -1.25, -0.5), 0.75f, Material_Mirror, Vec3(0.f), Vec3(1.f), 16, 0.f, 0.f);
@@ -249,6 +251,8 @@ public:
     void setup_cornell_box_mesh() {
         directIlluminationReinhardKey = 0.9f;
         causticsReinhardKey = 0.0002f;
+        // 500000 photons => 0.0001f
+
         setup_cornell_box();
         addMesh("../data/epcot.off", Vec3(0.0, -0.4, 0.0), Material_Mirror, Vec3(0.f), Vec3(1.f), 16, 0.0, 1.5);
     }
@@ -264,8 +268,7 @@ public:
 
     void addSphere(const Vec3 &center, const float radius, const MaterialType materialType, const Vec3 &diffuseColor,
                    const Vec3 &specularColor, const float shininess, const float transparency = 0.f, const float indexMedium = 0.f) {
-        spheres.emplace_back();
-        Sphere &s = spheres.back();
+        Sphere s;
         s.m_center = center;
         s.m_radius = radius;
         s.buildArrays();
@@ -275,22 +278,18 @@ public:
         s.material.shininess = shininess;
         s.material.transparency = transparency;
         s.material.index_medium = indexMedium;
+        spheres.emplace_back(s);
     }
 
-    void addSquare(const Vec3 &quadPos, const Vec3 &quadWidth, const Vec3 &quadHeight, const float scaleWidth,
-                   const float scaleHeight, const Vec3 &translate, const float rotateYAngle, const Vec3 &diffuseColor,
-                   const Vec3 &specularColor, const float shininess, const float rotateXAngle = 0.f) {
-        squares.emplace_back();
-        Square &s = squares.back();
+    void addSquare(const Vec3 &quadPos, const Vec3 &quadWidth, const Vec3 &quadHeight, const float scaleWidth, const float scaleHeight,
+        const Vec3 &diffuseColor, const Vec3 &specularColor, const float shininess) {
+        Square s;
         s.setQuad(quadPos, quadWidth, quadHeight, scaleWidth, scaleHeight);
-        s.scale(Vec3(2., 2., 1.));
-        s.translate(translate);
-        if (rotateXAngle != 0.f) s.rotateX(rotateXAngle);
-        if (rotateYAngle != 0.f) s.rotateY(rotateYAngle);
         s.buildArrays();
         s.material.diffuse_material = diffuseColor;
         s.material.specular_material = specularColor;
         s.material.shininess = shininess;
+        squares.emplace_back(s);
     }
 
     void addMesh(const std::string &filePath, const Vec3 &translation, const MaterialType materialType,
@@ -327,9 +326,7 @@ public:
             // Back Wall
             squares.resize(squares.size() + 1);
             Square &s = squares[squares.size() - 1];
-            s.setQuad(Vec3(-1., -1., 0.), Vec3(1., 0, 0.), Vec3(0., 1, 0.), 2., 2.);
-            s.scale(Vec3(2., 2., 1.));
-            s.translate(Vec3(0., 0., -2.));
+            s.setQuad(Vec3(-2., -2., -2.), Vec3(2., 0., 0.), Vec3(0., 2., 0.), 4., 4.);
             s.buildArrays();
             s.material.diffuse_material = Vec3(1., 1., 1.);
             s.material.specular_material = Vec3(0.05, 0.05, 0.05);
@@ -338,10 +335,7 @@ public:
             // Left Wall
             squares.resize(squares.size() + 1);
             Square &s = squares[squares.size() - 1];
-            s.setQuad(Vec3(-1., -1., 0.), Vec3(1., 0, 0.), Vec3(0., 1, 0.), 2., 2.);
-            s.scale(Vec3(2., 2., 1.));
-            s.translate(Vec3(0., 0., -2.));
-            s.rotateY(90);
+            s.setQuad(Vec3(-2., -2., 2.), Vec3(0., 0., -2.), Vec3(0., 2, 0.), 4., 4.);
             s.buildArrays();
             s.material.diffuse_material = Vec3(194.0f / 255.0f, 49.0f / 255.0f, 44.0f / 255.0f);
             s.material.specular_material = Vec3(194.0f / 255.0f, 49.0f / 255.0f, 44.0f / 255.0f) * 0.5f;
@@ -350,10 +344,7 @@ public:
             // Right Wall
             squares.resize(squares.size() + 1);
             Square &s = squares[squares.size() - 1];
-            s.setQuad(Vec3(-1., -1., 0.), Vec3(1., 0, 0.), Vec3(0., 1, 0.), 2., 2.);
-            s.translate(Vec3(0., 0., -2.));
-            s.scale(Vec3(2., 2., 1.));
-            s.rotateY(-90);
+            s.setQuad(Vec3(2., -2., -2.), Vec3(0., 0., 2.), Vec3(0., 2., 0.), 4., 4.);
             s.buildArrays();
             s.material.diffuse_material = Vec3(22.0f / 255.0f, 34.0f / 255.0f, 101.0f / 255.0f);
             s.material.specular_material = Vec3(22.0f / 255.0f, 34.0f / 255.0f, 101.0f / 255.0f) * 0.5f;
@@ -362,7 +353,7 @@ public:
             // Floor
             if (settings.floorType == CHECKERBOARD) {
                 constexpr int numSquares = 8; // Number of squares per row/column
-                constexpr float squareSize = 2.0f / numSquares;
+                constexpr float squareSize = 4.0f / numSquares;
                 squares.resize(squares.size() + numSquares * numSquares);
                 const Vec3 color1(1.0f, 1.0f, 1.0f); // Blanc
                 const Vec3 color2(0.0f, 0.0f, 0.0f); // Noir
@@ -371,14 +362,11 @@ public:
                     for (int j = 0; j < numSquares; ++j) {
                         Square &s = squares[squares.size() - numSquares * (i + 1) + j];
                         s.setQuad(
-                            Vec3(-1 + static_cast<float>(j) * squareSize, -1 + static_cast<float>(i) * squareSize, 0.),
-                            Vec3(squareSize, 0, 0),
-                            Vec3(0, squareSize, 0),
+                            Vec3(2 - static_cast<float>(j) * squareSize, -2, -2 + static_cast<float>(i) * squareSize),
+                            Vec3(-squareSize, 0, 0),
+                            Vec3(0, 0, squareSize),
                             squareSize, squareSize
                         );
-                        s.translate(Vec3(0., 0., -2.));
-                        s.scale(Vec3(2., 2., 1.));
-                        s.rotateX(-90);
                         s.buildArrays();
                         s.material.diffuse_material = ((i + j) % 2 == 0) ? color1 : color2;
                         s.material.specular_material = Vec3(0.2f, 0.2f, 0.2f);
@@ -388,10 +376,7 @@ public:
             } else if (settings.floorType == PLAIN) {
                     squares.resize(squares.size() + 1);
                     Square &s = squares[squares.size() - 1];
-                    s.setQuad(Vec3(-1., -1., 0.), Vec3(1., 0, 0.), Vec3(0., 1, 0.), 2., 2.);
-                    s.translate(Vec3(0., 0., -2.));
-                    s.scale(Vec3(2., 2., 1.));
-                    s.rotateX(-90);
+                    s.setQuad(Vec3(2., -2., -2.), Vec3(-2., 0., 0.), Vec3(0., 0., 2.), 4., 4.);
                     s.buildArrays();
                     s.material.diffuse_material = Vec3(1.0, 1.0, 1.0);
                     s.material.specular_material = Vec3(0.5, 0.5, 0.5);
@@ -401,10 +386,7 @@ public:
             // Ceiling
             squares.resize(squares.size() + 1);
             Square &s = squares[squares.size() - 1];
-            s.setQuad(Vec3(-1., -1., 0.), Vec3(1., 0, 0.), Vec3(0., 1, 0.), 2., 2.);
-            s.translate(Vec3(0., 0., -2.));
-            s.scale(Vec3(2., 2., 1.));
-            s.rotateX(90);
+            s.setQuad(Vec3(-2., 2., -2.), Vec3(2., 0., 0.), Vec3(0., 0., 2.), 4., 4.);
             s.buildArrays();
             s.material.diffuse_material = Vec3(1.0, 1.0, 1.0);
             s.material.specular_material = Vec3(1.0, 1.0, 1.0) * 0.2f;
@@ -413,10 +395,7 @@ public:
             // Front Wall
             squares.resize(squares.size() + 1);
             Square &s = squares[squares.size() - 1];
-            s.setQuad(Vec3(-1., -1., 0.), Vec3(1., 0, 0.), Vec3(0., 1, 0.), 2., 2.);
-            s.translate(Vec3(0., 0., -2.));
-            s.scale(Vec3(2., 2., 1.));
-            s.rotateY(180);
+            s.setQuad(Vec3(-2., 2., 2.), Vec3(2., 0., 0.), Vec3(0., -2., 0.), 4., 4.);
             s.buildArrays();
             s.material.diffuse_material = Vec3(1.0, 1.0, 1.0);
             s.material.specular_material = Vec3(0.05, 0.05, 0.05);

@@ -7,12 +7,8 @@
 #include <cmath>
 
 // Structure to hold the results of a ray-square intersection
-struct RaySquareIntersection {
-    bool intersectionExists{};
-    float t{};
+struct RaySquareIntersection : RayIntersection {
     float u{}, v{};
-    Vec3 intersection;
-    Vec3 normal;
 };
 
 // Class representing a square in 3D space
@@ -30,6 +26,7 @@ public:
            const float uMin = 0.0f, const float uMax = 1.0f,
            const float vMin = 0.0f, const float vMax = 1.0f) : Mesh() {
         setQuad(bottomLeft, rightVector, upVector, width, height, uMin, uMax, vMin, vMax);
+        Square::computeAABB();
     }
 
     // Set up the square with given parameters
@@ -55,10 +52,24 @@ public:
         triangles.resize(2);
         triangles[0] = {0, 1, 2}; // First triangle
         triangles[1] = {0, 2, 3}; // Second triangle
+        Square::computeAABB();
+    }
+
+    void computeAABB() override {
+        // Calculate the AABB of the square
+        const Vec3 min = m_bottom_left;
+        const Vec3 max = m_bottom_left + m_right_vector + m_up_vector;
+
+        aabb = AABB(min, max);
+    }
+
+    [[nodiscard]] bool intersectAABB(const Ray &ray) const override {
+        // Check if the ray intersects the square's AABB
+        return ray.intersectAABB(aabb);
     }
 
     // Check for intersection between the ray and the square
-    [[nodiscard]] RaySquareIntersection intersectSquare(const Ray &ray) const {
+    [[nodiscard]] RayIntersection intersect(const Ray &ray) const override {
         RaySquareIntersection intersection;
         intersection.intersectionExists = false; // Initialize to no intersection
 

@@ -7,12 +7,17 @@ RaySceneIntersection Intersection::computeIntersection(const Ray &ray, const std
 
     // For each object in the scene, compute the intersection with the ray
     for (unsigned int i = 0; i < spheres.size(); i++) {
-        const RaySphereIntersection intersection = spheres[i].intersectSphere(ray);
+        // We first check if the ray intersects an AABB around the sphere
+        if (!spheres[i].intersectAABB(ray)) {
+            continue;
+        }
+
+        const RayIntersection intersection = spheres[i].intersect(ray);
 
         // If the intersection exists and is closer than the previous one, keep it
         if (intersection.intersectionExists && intersection.t <= result.t) {
             result.intersectionExists = true;
-            result.raySphereIntersection = intersection;
+            result.raySphereIntersection = static_cast<RaySphereIntersection>(intersection);
             result.t = intersection.t;
             result.objectIndex = i;
             result.typeOfIntersectedObject = 0;
@@ -20,12 +25,17 @@ RaySceneIntersection Intersection::computeIntersection(const Ray &ray, const std
     }
 
     for (unsigned int i = 0; i < squares.size(); i++) {
-        const RaySquareIntersection intersection = squares[i].intersectSquare(ray);
+        // We first check if the ray intersects an AABB around the square
+        if (!squares[i].intersectAABB(ray)) {
+            continue;
+        }
+
+        const RayIntersection intersection = squares[i].intersect(ray);
 
         // If the intersection exists and is closer than the previous one, keep it
         if (intersection.intersectionExists && intersection.t <= result.t && intersection.t > z_near) {
             result.intersectionExists = true;
-            result.raySquareIntersection = intersection;
+            result.raySquareIntersection = static_cast<RaySquareIntersection>(intersection);
             result.t = intersection.t;
             result.objectIndex = i;
             result.typeOfIntersectedObject = 1;
@@ -33,12 +43,17 @@ RaySceneIntersection Intersection::computeIntersection(const Ray &ray, const std
     }
 
     for (unsigned int i = 0; i < meshes.size(); i++) {
-        const RayTriangleIntersection intersection = meshes[i].intersect(ray);
+        // We first check if the ray intersects an AABB around the mesh
+        if (!meshes[i].intersectAABB(ray)) {
+            continue;
+        }
+
+        const RayIntersection intersection = meshes[i].intersect(ray);
 
         // If the intersection exists and is closer than the previous one, keep it
         if (intersection.intersectionExists && intersection.t <= result.t && intersection.t > z_near) {
             result.intersectionExists = true;
-            result.rayMeshIntersection = intersection;
+            result.rayMeshIntersection = static_cast<RayTriangleIntersection>(intersection);
             result.t = intersection.t;
             result.objectIndex = i;
             result.typeOfIntersectedObject = 2;

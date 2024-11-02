@@ -2,17 +2,14 @@
 #define SPHERE_H
 
 #include "Vec3.h"
+#include "Ray.h"
 #include <cmath>
 #include <vector>
 
 // Struct to hold the results of a ray-sphere intersection
-struct RaySphereIntersection {
-    bool intersectionExists{};
-    float t{};
+struct RaySphereIntersection : RayIntersection {
     float theta{}, phi{};
-    Vec3 intersection;
     Vec3 secondIntersection;
-    Vec3 normal;
 };
 
 // Converts spherical coordinates (theta, phi, radius) to Euclidean coordinates
@@ -92,10 +89,27 @@ public:
                 triangles_array.push_back(vertexuV);
             }
         }
+
+        Sphere::computeAABB();
+    }
+
+    void computeAABB() override {
+        // Calculate the AABB of the sphere
+        const Vec3 min = m_center - Vec3(m_radius, m_radius, m_radius);
+        const Vec3 max = m_center + Vec3(m_radius, m_radius, m_radius);
+        aabb = AABB(min, max);
+    }
+
+    [[nodiscard]] bool intersectAABB(const Ray &ray) const override {
+        if (aabb.min == aabb.max) {
+            exit(1);
+        }
+        // Check if the ray intersects the sphere's AABB
+        return ray.intersectAABB(aabb);
     }
 
     // Checks for intersection between a ray and the sphere
-    [[nodiscard]] RaySphereIntersection intersectSphere(const Ray &ray) const {
+    [[nodiscard]] RayIntersection intersect(const Ray &ray) const override {
         RaySphereIntersection intersection;
         const Vec3 oc = ray.origin() - m_center; // Vector from sphere center to ray origin
         const Vec3 d = ray.direction(); // Ray direction

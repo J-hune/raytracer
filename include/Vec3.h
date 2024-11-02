@@ -73,6 +73,13 @@ public:
         return *this;
     }
 
+    Vec3 &max(const Vec3 &vec3) {
+        for (int i = 0; i < 3; ++i) {
+            mVals[i] = std::max(mVals[i], vec3[i]);
+        }
+        return *this;
+    }
+
     static float dot(Vec3 const &a, Vec3 const &b) {
         return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
     }

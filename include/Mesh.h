@@ -6,8 +6,8 @@
 #include <string>
 #include "Vec3.h"
 #include "Ray.h"
-#include "Triangle.h"
 #include "Material.h"
+#include "AABB.h"
 
 // -------------------------------------------
 // Basic Mesh class
@@ -50,6 +50,7 @@ public:
     std::vector<MeshVertex> vertices;
     std::vector<MeshTriangle> triangles;
     Material material;
+    AABB aabb;
 
     void loadOFF(const std::string& filename);
 
@@ -88,7 +89,9 @@ public:
     void rotateZ(float angle);
     void draw() const;
 
-    [[nodiscard]] virtual RayTriangleIntersection intersect(const Ray& ray) const;
+    virtual void computeAABB();
+    [[nodiscard]] virtual bool intersectAABB(const Ray& ray) const;
+    [[nodiscard]] virtual RayIntersection intersect(const Ray& ray) const;
 
     virtual void buildArrays();
 
