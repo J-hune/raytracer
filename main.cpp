@@ -501,7 +501,7 @@ int main(int argc, char **argv) {
     scenes[0].setup_single_sphere();
     scenes[1].setup_multiple_spheres();
     scenes[2].setup_single_square();
-    scenes[3].setup_cornell_box();
+    scenes[3].setup_cornell_box_with_2_spheres();
     scenes[4].setup_cornell_box_mesh();
     glutMainLoop();
 
