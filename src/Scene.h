@@ -21,11 +21,12 @@ class Scene {
     std::vector<Square> squares;
     std::vector<Light> lights;
     PhotonMap photonMap;
+    bool photonsEmitted = false;
 
 public:
     Scene() = default;
 
-    void draw() const {
+    void draw() {
         const Settings &settings = Settings::getInstance();
 
         // Iterate over all objects and render them:
@@ -34,6 +35,11 @@ public:
         for (const auto &square: squares) square.draw();
 
         if (settings.drawDebugPhotons) photonMap.debugDrawPhotons();
+        if (!photonsEmitted && settings.caustics) {
+            std::cout << "Emitting photons, the application will freeze for a few seconds..." << std::endl;
+            photonMap.emitPhotons(lights, spheres, squares, meshes, settings.photons);
+            photonsEmitted = true;
+        }
     }
 
     Vec3 rayTrace(Ray const &rayStart, std::mt19937 &rng) {
@@ -201,19 +207,6 @@ public:
         }
 
         return color; // Return the accumulated refraction color
-    }
-
-    static Vec3 randomDirection(std::mt19937 &rng) {
-        std::uniform_real_distribution<float> dist(0.0f, 1.0f);
-        const float theta = 2.0f * M_PIf * dist(rng);
-        constexpr float coneAngle = M_PIf / 6.f * 2.5f; // Cone angle to limit the spread of the photons
-        const float phi = coneAngle * dist(rng); // Limit phi between 0 and coneAngle
-
-        float x = std::sin(phi) * std::cos(theta);
-        float y = -std::cos(phi); // Negative to limit the direction to the upper hemisphere
-        float z = std::sin(phi) * std::sin(theta);
-
-        return {x, y, z};
     }
 
 

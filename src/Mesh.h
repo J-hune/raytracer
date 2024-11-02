@@ -1,6 +1,7 @@
 #ifndef MESH_H
 #define MESH_H
 
+#include <random>
 #include <vector>
 #include <string>
 #include "Vec3.h"
@@ -51,6 +52,30 @@ public:
     Material material;
 
     void loadOFF(const std::string& filename);
+
+    MeshVertex getRandomPointOnSurface(std::mt19937 &rng) const {
+        std::uniform_int_distribution<size_t> triangleDist(0, triangles.size() - 1);
+        const MeshTriangle& triangle = triangles[triangleDist(rng)];
+
+        const MeshVertex& v0 = vertices[triangle[0]];
+        const MeshVertex& v1 = vertices[triangle[1]];
+        const MeshVertex& v2 = vertices[triangle[2]];
+
+        std::uniform_real_distribution<float> dist(0.0f, 1.0f);
+        float u = dist(rng);
+        float v = dist(rng);
+
+        if (u + v > 1.0f) {
+            u = 1.0f - u;
+            v = 1.0f - v;
+        }
+
+        Vec3 position = v0.position * (1.0f - u - v) + v1.position * u + v2.position * v;
+        Vec3 normal = v0.normal * (1.0f - u - v) + v1.normal * u + v2.normal * v;
+
+        return MeshVertex(position, normal);
+    }
+
     void recomputeNormals();
     void centerAndScaleToUnit();
     void scaleUnit();
