@@ -22,6 +22,8 @@ class Scene {
     std::vector<Light> lights;
     PhotonMap photonMap;
     bool photonsEmitted = false;
+    float directIlluminationReinhardKey = 0.0f;
+    float causticsReinhardKey = 0.0f;
 
 public:
     Scene() = default;
@@ -74,7 +76,7 @@ public:
         // Add direct illumination
         if (settings.directIllumination && material.type == Material_Diffuse_Blinn_Phong) {
             const Vec3 directIlluminationColor = computeDirectIllumination(ray, intersectionPoint, normal, material, settings, rng);
-            color += reinhardToneMapping(directIlluminationColor, 0.9f);
+            color += directIlluminationReinhardKey > 0 ? reinhardToneMapping(directIlluminationColor, directIlluminationReinhardKey) : directIlluminationColor;
         }
 
         // Add caustics effect
@@ -82,7 +84,7 @@ public:
             const Vec3 causticsColor = photonMap.computeCaustics(intersectionPoint, material);
 
             // Tone mapping
-            color += reinhardToneMapping(causticsColor, 0.001f);
+            color += reinhardToneMapping(causticsColor, causticsReinhardKey);
         }
 
         // Add reflection
@@ -287,6 +289,8 @@ public:
 
     void setup_cornell_box() {
         const Settings &settings = Settings::getInstance();
+        directIlluminationReinhardKey = 0.9f;
+        causticsReinhardKey = 0.0003f;
 
         meshes.clear();
         spheres.clear();
@@ -428,10 +432,139 @@ public:
             s.material.transparency = 0.;
             s.material.index_medium = 0.;
         }
+    }
 
-        if (settings.caustics) {
-            std::cout << "Emitting photons, the application will freeze for a few seconds..." << std::endl;
-            photonMap.emitPhotons(lights, spheres, squares, meshes, settings.photons);
+    void setup_cornell_box_mesh() {
+        const Settings &settings = Settings::getInstance();
+        directIlluminationReinhardKey = 0.f;
+        causticsReinhardKey = 0.02f;
+
+        meshes.clear();
+        spheres.clear();
+        squares.clear();
+        lights.clear();
+        const Light light(Vec3(0.0, 1.5, 0.0), LightType_Quad, Vec3(1, 1, 1), 2.5f, 2.f, false);
+        light.quad = Mesh();
+        light.quad.vertices.emplace_back(Vec3(-0.5, 1.5, -0.5), Vec3(0, -1, 0));
+        light.quad.vertices.emplace_back(Vec3(0.5, 1.5, -0.5), Vec3(0, -1, 0));
+        light.quad.vertices.emplace_back(Vec3(0.5, 1.5, 0.5), Vec3(0, -1, 0));
+        light.quad.vertices.emplace_back(Vec3(-0.5, 1.5, 0.5), Vec3(0, -1, 0));
+        light.quad.triangles.emplace_back(0, 1, 2);
+        light.quad.triangles.emplace_back(0, 2, 3);
+        light.quad.buildArrays();
+        lights.push_back(light);
+
+        {
+            // Back Wall
+            squares.resize(squares.size() + 1);
+            Square &s = squares[squares.size() - 1];
+            s.setQuad(Vec3(-1., -1., 0.), Vec3(1., 0, 0.), Vec3(0., 1, 0.), 2., 2.);
+            s.scale(Vec3(2., 2., 1.));
+            s.translate(Vec3(0., 0., -2.));
+            s.buildArrays();
+            s.material.diffuse_material = Vec3(1., 1., 1.);
+            s.material.specular_material = Vec3(0.05, 0.05, 0.05);
+            s.material.shininess = 5;
+        } {
+            // Left Wall
+            squares.resize(squares.size() + 1);
+            Square &s = squares[squares.size() - 1];
+            s.setQuad(Vec3(-1., -1., 0.), Vec3(1., 0, 0.), Vec3(0., 1, 0.), 2., 2.);
+            s.scale(Vec3(2., 2., 1.));
+            s.translate(Vec3(0., 0., -2.));
+            s.rotateY(90);
+            s.buildArrays();
+            s.material.diffuse_material = Vec3(194.0f / 255.0f, 49.0f / 255.0f, 44.0f / 255.0f);
+            s.material.specular_material = Vec3(194.0f / 255.0f, 49.0f / 255.0f, 44.0f / 255.0f) * 0.5f;
+            s.material.shininess = 16;
+        } {
+            // Right Wall
+            squares.resize(squares.size() + 1);
+            Square &s = squares[squares.size() - 1];
+            s.setQuad(Vec3(-1., -1., 0.), Vec3(1., 0, 0.), Vec3(0., 1, 0.), 2., 2.);
+            s.translate(Vec3(0., 0., -2.));
+            s.scale(Vec3(2., 2., 1.));
+            s.rotateY(-90);
+            s.buildArrays();
+            s.material.diffuse_material = Vec3(22.0f / 255.0f, 34.0f / 255.0f, 101.0f / 255.0f);
+            s.material.specular_material = Vec3(22.0f / 255.0f, 34.0f / 255.0f, 101.0f / 255.0f) * 0.5f;
+            s.material.shininess = 16;
+        } {
+            // Floor
+            if (settings.floorType == CHECKERBOARD) {
+                constexpr int numSquares = 8; // Number of squares per row/column
+                constexpr float squareSize = 2.0f / numSquares;
+                squares.resize(squares.size() + numSquares * numSquares);
+                const Vec3 color1(1.0f, 1.0f, 1.0f); // Blanc
+                const Vec3 color2(0.0f, 0.0f, 0.0f); // Noir
+
+                for (int i = 0; i < numSquares; ++i) {
+                    for (int j = 0; j < numSquares; ++j) {
+                        Square &s = squares[squares.size() - numSquares * (i + 1) + j];
+                        s.setQuad(
+                            Vec3(-1 + static_cast<float>(j) * squareSize, -1 + static_cast<float>(i) * squareSize, 0.),
+                            Vec3(squareSize, 0, 0),
+                            Vec3(0, squareSize, 0),
+                            squareSize, squareSize
+                        );
+                        s.translate(Vec3(0., 0., -2.));
+                        s.scale(Vec3(2., 2., 1.));
+                        s.rotateX(-90);
+                        s.buildArrays();
+                        s.material.diffuse_material = ((i + j) % 2 == 0) ? color1 : color2;
+                        s.material.specular_material = Vec3(0.2f, 0.2f, 0.2f);
+                        s.material.shininess = 20;
+                    }
+                }
+            } else if (settings.floorType == PLAIN) {
+                    squares.resize(squares.size() + 1);
+                    Square &s = squares[squares.size() - 1];
+                    s.setQuad(Vec3(-1., -1., 0.), Vec3(1., 0, 0.), Vec3(0., 1, 0.), 2., 2.);
+                    s.translate(Vec3(0., 0., -2.));
+                    s.scale(Vec3(2., 2., 1.));
+                    s.rotateX(-90);
+                    s.buildArrays();
+                    s.material.diffuse_material = Vec3(1.0, 1.0, 1.0);
+                    s.material.specular_material = Vec3(0.5, 0.5, 0.5);
+                    s.material.shininess = 16;
+            }
+        } {
+            // Ceiling
+            squares.resize(squares.size() + 1);
+            Square &s = squares[squares.size() - 1];
+            s.setQuad(Vec3(-1., -1., 0.), Vec3(1., 0, 0.), Vec3(0., 1, 0.), 2., 2.);
+            s.translate(Vec3(0., 0., -2.));
+            s.scale(Vec3(2., 2., 1.));
+            s.rotateX(90);
+            s.buildArrays();
+            s.material.diffuse_material = Vec3(1.0, 1.0, 1.0);
+            s.material.specular_material = Vec3(1.0, 1.0, 1.0) * 0.2f;
+            s.material.shininess = 16;
+        } {
+            // Front Wall
+            squares.resize(squares.size() + 1);
+            Square &s = squares[squares.size() - 1];
+            s.setQuad(Vec3(-1., -1., 0.), Vec3(1., 0, 0.), Vec3(0., 1, 0.), 2., 2.);
+            s.translate(Vec3(0., 0., -2.));
+            s.scale(Vec3(2., 2., 1.));
+            s.rotateY(180);
+            s.buildArrays();
+            s.material.diffuse_material = Vec3(1.0, 1.0, 1.0);
+            s.material.specular_material = Vec3(0.05, 0.05, 0.05);
+            s.material.shininess = 5;
+        } {
+            // Mesh
+            meshes.resize(meshes.size() + 1);
+            Mesh &m = meshes[meshes.size() - 1];
+            m.loadOFF("data/epcot.off");
+            m.translate(Vec3(0.0, -0.4, 0.0));
+            m.buildArrays();
+            m.material.type = Material_Glass;
+            m.material.diffuse_material = Vec3(0.f);
+            m.material.specular_material = Vec3(1.f);
+            m.material.shininess = 16;
+            m.material.transparency = 0.0;
+            m.material.index_medium = 1.5;
         }
     }
 };

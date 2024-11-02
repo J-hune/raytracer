@@ -205,10 +205,10 @@ Vec3 PhotonMap::randomDirection(std::mt19937 &rng, const std::vector<Sphere>& sp
 
     Vec3 target;
 
-    if (objectIndex < spheres.size()) {
+    if (objectIndex < static_cast<int>(spheres.size())) {
         // Select a random point on the sphere
         const Sphere& sphere = spheres[objectIndex];
-        const float theta = dist(rng) * 2.0f * M_PI;
+        const float theta = dist(rng) * 2.0f * M_PIf;
         const float phi = std::acos(2.0f * dist(rng) - 1.0f);
         const float x = (sphere.m_radius * 1.01f) * std::sin(phi) * std::cos(theta);
         const float y = (sphere.m_radius * 1.01f) * std::sin(phi) * std::sin(theta);
