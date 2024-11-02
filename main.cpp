@@ -180,6 +180,23 @@ void printProgressBar(const int progress) {
     if (progress == 100) std::cout << std::endl;
 }
 
+void export_partial_image(const std::vector<Vec3>& image, const int w, const int h, const std::string& filename) {
+    std::ofstream f(filename, std::ios::binary);
+    if (!f) {
+        std::cout << "Error: Could not open file " << filename << " for writing." << std::endl;
+        return;
+    }
+
+    f << "P3\n" << w << " " << h << "\n255\n";
+    for (const auto& pixel : image) {
+        f << static_cast<int>(255.f * std::min(1.f, pixel[0])) << " "
+          << static_cast<int>(255.f * std::min(1.f, pixel[1])) << " "
+          << static_cast<int>(255.f * std::min(1.f, pixel[2])) << " ";
+    }
+
+    f.close();
+}
+
 void ray_trace_section(const int w, const int h, const unsigned int nsamples,
     std::vector<Vec3> &image, std::mt19937 &rng, std::uniform_real_distribution<float> &dist, const int totalRows)
 {
@@ -233,6 +250,12 @@ void ray_trace_section(const int w, const int h, const unsigned int nsamples,
                 if (progress > lastPrintedProgress) {
                     lastPrintedProgress = progress;
                     printProgressBar(progress);
+                }
+
+                if (progress % 10 == 0) {
+                    std::ostringstream partialFilename;
+                    partialFilename << "renders/render_partial.ppm";
+                    export_partial_image(image, w, h, partialFilename.str());
                 }
             }
         }
@@ -293,12 +316,12 @@ void ray_trace_from_camera(const Settings &settings) {
     oss << std::put_time(&tm, "%Y-%m-%d_%H-%M-%S");
     std::string time_str = oss.str();
 
-    std::filesystem::create_directories("rendus");
-    std::string filename = "rendus/rendu_" + time_str + ".ppm";
+    std::filesystem::create_directories("renders");
+    std::string filename = "renders/render_" + time_str + ".ppm";
 
     std::ofstream f(filename, std::ios::binary);
     if (!f) {
-        std::cout << "Impossible d'ouvrir le fichier : " << filename << std::endl;
+        std::cout << "Error: Could not open file " << filename << " for writing." << std::endl;
         return;
     }
 
