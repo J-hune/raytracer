@@ -26,6 +26,13 @@ public:
         return *this;
     }
 
+    Vec3 clamp(const float min, const float max) {
+        for (float & mVal : mVals) {
+            mVal = std::clamp(mVal, min, max);
+        }
+        return *this;
+    }
+
     [[nodiscard]] float squareLength() const {
         return mVals[0] * mVals[0] + mVals[1] * mVals[1] + mVals[2] * mVals[2];
     }
@@ -106,6 +113,10 @@ public:
             mVal /= s;
         }
         return *this;
+    }
+
+    Vec3 operator/(const Vec3 &other) const {
+        return {mVals[0] / other[0], mVals[1] / other[1], mVals[2] / other[2]};
     }
 
     static Vec3 compProduct(Vec3 const &a, Vec3 const &b) {

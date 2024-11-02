@@ -22,6 +22,9 @@ public:
     mutable int samples = 100;
     mutable int shadowRays = 16;
     int photons = 20000;
+    bool directIllumination = true;
+    bool reflections = true;
+    bool refractions = true;
     bool caustics = true;
     mutable bool drawDebugPhotons = false;
     TypeOfFloor floorType = CHECKERBOARD;

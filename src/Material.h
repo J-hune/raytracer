@@ -4,7 +4,7 @@
 #include "Vec3.h"
 
 enum MaterialType {
-    Material_Diffuse_Blinn_Phong ,
+    Material_Diffuse_Blinn_Phong,
     Material_Glass,
     Material_Mirror
 };

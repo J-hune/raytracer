@@ -466,10 +466,13 @@ int main(int argc, char **argv) {
     Settings &settings = Settings::getInstance();
     settings.width = 480;
     settings.height = 480;
-    settings.samples = 100;
+    settings.samples = 80;
     settings.shadowRays = 16;
-    settings.photons = 50000;
+    settings.photons = 500000;
+    settings.directIllumination = true;
     settings.caustics = true;
+    settings.reflections = true;
+    settings.refractions = true;
     settings.drawDebugPhotons = true;
     settings.floorType = CHECKERBOARD; //PLAIN, CHECKERBOARD (checkerboard is a lot slower)
 
