@@ -10,13 +10,17 @@
 /******************************************** PHOTON EMISSION FUNCTIONS *******************************************/
 /******************************************************************************************************************/
 
+
 void PhotonMap::emitPhotons(
-    const std::vector<Light> &lights, const std::vector<Sphere> &spheres,
-    const std::vector<Square> &squares, const std::vector<Mesh> &meshes, const int photons)
+    const std::vector<Light> &lights, const std::vector<Sphere> &spheres, const std::vector<Square> &squares,
+    const std::vector<Mesh> &meshes, const MeshKDTree &kdTree, const int photons)
 {
+    if (photons <= 0) {
+        throw std::invalid_argument("Number of photons must be greater than zero.");
+    }
+
     if (lights.empty()) {
-        std::cerr << "Error: No lights in the scene, cannot emit photons." << std::endl;
-        return;
+        throw std::invalid_argument("No lights in the scene.");
     }
 
     std::vector<Photon> mirrorPhotons;
@@ -34,9 +38,8 @@ void PhotonMap::emitPhotons(
     std::vector<std::thread> threads;
     for (int i = 0; i < numThreads; ++i) {
         threads.emplace_back(
-            &PhotonMap::emitPhotonsForThread, this, photonsPerThread, std::ref(lights), std::ref(spheres),
-            std::ref(squares), std::ref(meshes), std::ref(photonMutex), std::ref(mirrorPhotons),
-            std::ref(glassPhotons), std::ref(photonsToEmit));
+            &PhotonMap::emitPhotonsForThread, this, photonsPerThread, std::cref(lights), std::cref(spheres), std::cref(squares),
+            std::cref(meshes), std::ref(kdTree), std::ref(photonMutex), std::ref(mirrorPhotons), std::ref(glassPhotons), std::ref(photonsToEmit));
     }
 
     // Wait for all threads to complete
@@ -44,14 +47,14 @@ void PhotonMap::emitPhotons(
         thread.join();
     }
 
-    mirrorPhotonTree = KDTree(mirrorPhotons);
-    glassPhotonTree = KDTree(glassPhotons);
+    mirrorPhotonTree = PhotonKDTree(mirrorPhotons);
+    glassPhotonTree = PhotonKDTree(glassPhotons);
 }
 
 void PhotonMap::emitPhotonsForThread(
     int photonCount, const std::vector<Light> &lights, const std::vector<Sphere> &spheres,
-    const std::vector<Square> &squares, const std::vector<Mesh> &meshes, std::mutex &photonMutex,
-    std::vector<Photon> &mirrorPhotons, std::vector<Photon> &glassPhotons, std::vector<Photon> &photonsToEmit)
+    const std::vector<Square> &squares, const std::vector<Mesh> &meshes, const MeshKDTree &kdTree,
+    std::mutex &photonMutex, std::vector<Photon> &mirrorPhotons, std::vector<Photon> &glassPhotons, std::vector<Photon> &photonsToEmit)
 {
     // Initialize a random number generator for this thread
     std::mt19937 threadRng(std::random_device{}());
@@ -80,7 +83,7 @@ void PhotonMap::emitPhotonsForThread(
             Ray ray(photon.position, photon.direction);
 
             // Compute intersection of the ray with the scene and extract intersection data
-            RaySceneIntersection intersection = Intersection::computeIntersection(ray, spheres, squares, meshes, 0.0f);
+            RaySceneIntersection intersection = Intersection::computeIntersection(ray, spheres, squares, meshes, kdTree, 0.0f);
             if (!intersection.intersectionExists) break;
             auto [intersectionPoint, normal, material] = Intersection::parseIntersection(intersection, spheres, squares, meshes);
 

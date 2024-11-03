@@ -1,8 +1,9 @@
 #ifndef AABB_H
 #define AABB_H
 
-#include "Vec3.h"
+#include <cfloat>
 #include <GL/gl.h>
+#include "Vec3.h"
 
 class AABB {
 private:
@@ -20,8 +21,10 @@ public:
     [[nodiscard]] Vec3 getMax() const { return max; }
     void setMax(const Vec3& _max) { max = _max; }
 
-    [[nodiscard]] Vec3 center() const {
-        return (min + max) * 0.5f;
+    [[nodiscard]] Vec3 center() const { return (min + max) * 0.5f; }
+
+    static AABB merge(const AABB& a, const AABB& b) {
+        return {Vec3::min(a.min, b.min), Vec3::max(a.max, b.max)};
     }
 
     void draw() const {
@@ -35,7 +38,7 @@ public:
         glVertex3f(min[0], min[1], max[2]);
         glVertex3f(min[0], min[1], min[2]);
 
-        // Vertical edges
+        // Vertical edges and top face
         glVertex3f(min[0], max[1], min[2]);
         glVertex3f(max[0], max[1], min[2]);
         glVertex3f(max[0], min[1], min[2]);
@@ -52,4 +55,4 @@ public:
     }
 };
 
-#endif //AABB_H
+#endif // AABB_H

@@ -28,5 +28,4 @@ struct Light {
     }
 };
 
-
 #endif //LIGHT_H

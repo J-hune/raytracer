@@ -483,7 +483,9 @@ int main(int argc, char **argv) {
     settings.reflections = true;
     settings.refractions = true;
     settings.drawDebugPhotons = true;
-    settings.drawDebugAABBs = true;
+    settings.drawDebugAABBs = false;
+    settings.useKDTree = true;
+    settings.maxKdTreeDepth = 12;
     settings.floorType = CHECKERBOARD; //PLAIN, CHECKERBOARD (checkerboard is a lot slower)
 
     if (argc > 2) {
