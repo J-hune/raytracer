@@ -75,7 +75,8 @@ void printUsage() {
         << "  p   : Quick Render" << endl
         << "  r   : Render Render" << endl
         << "  +   : Switch Scene" << endl
-        << "  d   : Debug draw mode" << endl
+        << "  d   : Draw Debug Photons" << endl
+        << "  a   : Draw Debug AABBs" << endl
         << endl
         << "Mouse Controls:" << endl
         << "---------------" << endl
@@ -378,6 +379,9 @@ void keyboard(const unsigned char key, int _x, int _y) {
                 fullScreen = true;
             }
             break;
+        case 'a':
+            settings.drawDebugAABBs = !settings.drawDebugAABBs;
+            break;
         case 'd':
             settings.drawDebugPhotons = !settings.drawDebugPhotons;
             break;
@@ -479,6 +483,7 @@ int main(int argc, char **argv) {
     settings.reflections = true;
     settings.refractions = true;
     settings.drawDebugPhotons = true;
+    settings.drawDebugAABBs = true;
     settings.floorType = CHECKERBOARD; //PLAIN, CHECKERBOARD (checkerboard is a lot slower)
 
     if (argc > 2) {

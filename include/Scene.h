@@ -43,6 +43,12 @@ public:
             photonMap.emitPhotons(lights, spheres, squares, meshes, settings.photons);
             photonsEmitted = true;
         }
+
+        if (settings.drawDebugAABBs) {
+            for (const auto &sphere: spheres) sphere.aabb.draw();
+            for (const auto &square: squares) square.aabb.draw();
+            for (const auto &mesh: meshes) mesh.aabb.draw();
+        }
     }
 
     Vec3 rayTrace(Ray const &rayStart, std::mt19937 &rng) {
@@ -254,7 +260,8 @@ public:
         // 500000 photons => 0.0001f
 
         setup_cornell_box();
-        addMesh("../data/epcot.off", Vec3(0.0, -0.4, 0.0), Material_Mirror, Vec3(0.f), Vec3(1.f), 16, 0.0, 1.5);
+        addMesh("../data/epcot.off", Vec3(0.0, -0.4, 0.0), Vec3(1.f),
+            Material_Mirror, Vec3(0.f), Vec3(1.f), 16, 0.0, 1.5);
     }
 
 
@@ -292,12 +299,13 @@ public:
         squares.emplace_back(s);
     }
 
-    void addMesh(const std::string &filePath, const Vec3 &translation, const MaterialType materialType,
+    void addMesh(const std::string &filePath, const Vec3 &translation, const Vec3 &scale, const MaterialType materialType,
                  const Vec3 &diffuseColor, const Vec3 &specularColor, const float shininess,
                  const float transparency = 0.f, const float indexMedium = 0.f) {
         meshes.emplace_back();
         Mesh &m = meshes.back();
         m.loadOFF(filePath);
+        m.scale(scale);
         m.translate(translation);
         m.buildArrays();
         m.material.type = materialType;

@@ -5,9 +5,13 @@
 #include <vector>
 #include <string>
 #include "Vec3.h"
-#include "Ray.h"
 #include "Material.h"
 #include "AABB.h"
+#include "Ray.h"
+#include <stdexcept>
+
+// Forward declaration of Ray class
+class Ray;
 
 // -------------------------------------------
 // Basic Mesh class
@@ -52,9 +56,17 @@ public:
     Material material;
     AABB aabb;
 
+    [[nodiscard]] Vec3 getPosition() const {
+        return aabb.center();
+    }
+
     void loadOFF(const std::string& filename);
 
     MeshVertex getRandomPointOnSurface(std::mt19937 &rng) const {
+        if (triangles.empty() || vertices.empty()) {
+            throw std::runtime_error("Mesh has no triangles or vertices.");
+        }
+
         std::uniform_int_distribution<size_t> triangleDist(0, triangles.size() - 1);
         const MeshTriangle& triangle = triangles[triangleDist(rng)];
 

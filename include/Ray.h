@@ -19,19 +19,22 @@ public:
     Ray() : Line(), tMax(FLT_MAX) {}
     Ray(const Vec3 &o, const Vec3 &d, const float tMax = FLT_MAX) : Line(o, d), tMax(tMax) {}
 
-    [[nodiscard]] bool intersectAABB(AABB aabb) const {
-        Vec3 invDirection = Vec3(1.f) / direction();
-        const float t1 = (aabb.min[0] - origin()[0]) * invDirection[0];
-        const float t2 = (aabb.max[0] - origin()[0]) * invDirection[0];
-        const float t3 = (aabb.min[1] - origin()[1]) * invDirection[1];
-        const float t4 = (aabb.max[1] - origin()[1]) * invDirection[1];
-        const float t5 = (aabb.min[2] - origin()[2]) * invDirection[2];
-        const float t6 = (aabb.max[2] - origin()[2]) * invDirection[2];
+    [[nodiscard]] bool intersectAABB(const AABB &aabb) const {
+        Vec3 invDir = Vec3(1.f) / direction();
+        Vec3 orig = origin();
 
-        const float tMin = std::max(std::max(std::min(t1, t2), std::min(t3, t4)), std::min(t5, t6));
-        const float tMax = std::min(std::min(std::max(t1, t2), std::max(t3, t4)), std::max(t5, t6));
+        float tMin = -FLT_MAX;
+        float tMax = FLT_MAX;
 
-        return tMax >= tMin && tMax >= 0 && tMin <= tMax;
+        for (int i = 0; i < 3; ++i) {
+            float t1 = (aabb.getMin()[i] - orig[i]) * invDir[i];
+            float t2 = (aabb.getMax()[i] - orig[i]) * invDir[i];
+
+            tMin = std::max(tMin, std::min(t1, t2));
+            tMax = std::min(tMax, std::max(t1, t2));
+        }
+
+        return tMax >= tMin && tMax >= 0;
     }
 };
 #endif
