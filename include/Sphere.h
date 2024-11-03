@@ -12,28 +12,6 @@ struct RaySphereIntersection : RayIntersection {
     Vec3 secondIntersection;
 };
 
-// Converts spherical coordinates (theta, phi, radius) to Euclidean coordinates
-[[maybe_unused]] static Vec3 SphericalCoordinatesToEuclidean(const Vec3 &thetaPhiR) {
-    return thetaPhiR[2] * Vec3(
-        std::cos(thetaPhiR[0]) * std::cos(thetaPhiR[1]),
-        std::sin(thetaPhiR[0]) * std::cos(thetaPhiR[1]),
-        std::sin(thetaPhiR[1])
-    );
-}
-
-// Converts spherical coordinates (theta, phi) to Euclidean coordinates
-[[maybe_unused]] static Vec3 SphericalCoordinatesToEuclidean(const float theta, const float phi) {
-    return {std::cos(theta) * std::cos(phi), std::sin(theta) * std::cos(phi), std::sin(phi)};
-}
-
-// Converts Euclidean coordinates to spherical coordinates
-[[maybe_unused]] static Vec3 EuclideanCoordinatesToSpherical(const Vec3 &xyz) {
-    const float R = xyz.length();
-    const float phi = std::asin(xyz[2] / R);
-    const float theta = std::atan2(xyz[1], xyz[0]);
-    return {theta, phi, R};
-}
-
 // Sphere class representing a 3D sphere mesh
 class Sphere : public Mesh {
 public:
@@ -43,7 +21,6 @@ public:
     Sphere() : Mesh() {}
     Sphere(const Vec3 &c, const float r) : Mesh(), m_center(c), m_radius(r) {}
 
-    // Builds arrays for vertices, normals, and texture coordinates
     void buildArrays() override {
         constexpr unsigned int nTheta = 20, nPhi = 20; // Number of subdivisions
         positions_array.resize(3 * nTheta * nPhi);
@@ -90,45 +67,40 @@ public:
             }
         }
 
-        Sphere::computeAABB();
+        computeAABB();
     }
 
     void computeAABB() override {
-        // Calculate the AABB of the sphere
         const Vec3 min = m_center - Vec3(m_radius, m_radius, m_radius);
         const Vec3 max = m_center + Vec3(m_radius, m_radius, m_radius);
         aabb = AABB(min, max);
     }
 
     [[nodiscard]] bool intersectAABB(const Ray &ray) const override {
-        // Check if the ray intersects the sphere's AABB
         return ray.intersectAABB(aabb);
     }
 
-    // Checks for intersection between a ray and the sphere
     [[nodiscard]] RayIntersection intersect(const Ray &ray) const override {
         RaySphereIntersection intersection;
         const Vec3 oc = ray.origin() - m_center; // Vector from sphere center to ray origin
         const Vec3 d = ray.direction(); // Ray direction
 
-        const float a = Vec3::dot(d, d); // d·d
-        const float b = 2.0f * Vec3::dot(d, oc); // 2·t·d·(o-c)
-        const float c = Vec3::dot(oc, oc) - m_radius * m_radius; // ||o-c||² - r²
+        const float a = Vec3::dot(d, d);
+        const float b = 2.0f * Vec3::dot(d, oc);
+        const float c = Vec3::dot(oc, oc) - m_radius * m_radius;
         const float delta = b * b - 4 * a * c; // Discriminant
 
-        // If the equation has no solution, there is no intersection
+        // No intersection
         if (delta < 0) {
             intersection.intersectionExists = false;
             return intersection;
         }
 
-        // There is an intersection; we will look for the closest positive one
         intersection.intersectionExists = true;
+        const float t1 = (-b - std::sqrt(delta)) / (2.0f * a);
+        const float t2 = (-b + std::sqrt(delta)) / (2.0f * a);
 
-        const float t1 = (-b - std::sqrt(delta)) / (2.0f * a); // First solution
-        const float t2 = (-b + std::sqrt(delta)) / (2.0f * a); // Second solution
-
-        // Determine the closest positive solution
+        // Closest positive intersection
         if (t1 > 0 && t2 > 0) {
             intersection.t = std::min(t1, t2);
         } else if (t1 > 0) {
@@ -136,14 +108,14 @@ public:
         } else if (t2 > 0) {
             intersection.t = t2;
         } else {
-            intersection.intersectionExists = false; // Both solutions are negative
+            intersection.intersectionExists = false;
             return intersection;
         }
 
-        // Calculate the intersection point
+        // Calculate intersection point
         intersection.intersection = ray.origin() + intersection.t * ray.direction();
 
-        // Calculate the second intersection point if the ray is not tangent to the sphere
+        // Calculate second intersection point if applicable
         if (t1 > 0 && t2 > 0) {
             intersection.secondIntersection = ray.origin() + t2 * ray.direction();
         }
@@ -151,6 +123,29 @@ public:
         // Calculate the normal at the intersection point
         intersection.normal = (intersection.intersection - m_center) / m_radius;
         return intersection;
+    }
+
+private:
+    // Converts spherical coordinates (theta, phi, radius) to Euclidean coordinates
+    [[maybe_unused]] static Vec3 SphericalCoordinatesToEuclidean(const Vec3 &thetaPhiR) {
+        return thetaPhiR[2] * Vec3(
+            std::cos(thetaPhiR[0]) * std::cos(thetaPhiR[1]),
+            std::sin(thetaPhiR[0]) * std::cos(thetaPhiR[1]),
+            std::sin(thetaPhiR[1])
+        );
+    }
+
+    // Converts spherical coordinates (theta, phi) to Euclidean coordinates
+    [[maybe_unused]] static Vec3 SphericalCoordinatesToEuclidean(float theta, float phi) {
+        return {std::cos(theta) * std::cos(phi), std::sin(theta) * std::cos(phi), std::sin(phi)};
+    }
+
+    // Converts Euclidean coordinates to spherical coordinates
+    [[maybe_unused]] static Vec3 EuclideanCoordinatesToSpherical(const Vec3 &xyz) {
+        const float R = xyz.length();
+        const float phi = std::asin(xyz[2] / R);
+        const float theta = std::atan2(xyz[1], xyz[0]);
+        return {theta, phi, R};
     }
 };
 

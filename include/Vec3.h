@@ -9,23 +9,66 @@ class Vec3;
 static inline Vec3 operator + (Vec3 const & a , Vec3 const & b);
 static inline Vec3 operator * (float a , Vec3 const & b);
 
+
 class Vec3 {
 private:
     float mVals[3];
 
 public:
+    // Constructors
     Vec3() : mVals{0.f, 0.f, 0.f} {}
     Vec3(const float x, const float y, const float z) : mVals{x, y, z} {}
     explicit Vec3(const float x) : mVals{x, x, x} {}
 
-    float &operator[](const unsigned int c) { return mVals[c]; }
-    float operator[](const unsigned int c) const { return mVals[c]; }
-
+    // Assignment operator
     Vec3 &operator=(Vec3 const &other) {
-        std::copy_n(other.mVals, 3, mVals);
+        if (this != &other) {
+            std::copy_n(other.mVals, 3, mVals);
+        }
         return *this;
     }
 
+    // Element access
+    float &operator[](const unsigned int c) { return mVals[c]; }
+    float operator[](const unsigned int c) const { return mVals[c]; }
+
+    // Vector operations
+    Vec3 &operator+=(Vec3 const &other) {
+        for (int i = 0; i < 3; ++i) {
+            mVals[i] += other[i];
+        }
+        return *this;
+    }
+
+    Vec3 &operator-=(Vec3 const &other) {
+        for (int i = 0; i < 3; ++i) {
+            mVals[i] -= other[i];
+        }
+        return *this;
+    }
+
+    Vec3 &operator*=(float s) {
+        for (float & mVal : mVals) {
+            mVal *= s;
+        }
+        return *this;
+    }
+
+    Vec3 &operator/=(const float s) {
+        for (float & mVal : mVals) {
+            mVal /= s;
+        }
+        return *this;
+    }
+
+    Vec3 &operator/(const Vec3 &other) {
+        for (int i = 0; i < 3; ++i) {
+            mVals[i] /= other[i];
+        }
+        return *this;
+    }
+
+    // Utility functions
     Vec3 clamp(const float min, const float max) {
         for (float & mVal : mVals) {
             mVal = std::clamp(mVal, min, max);
@@ -62,10 +105,12 @@ public:
         return L > 0 ? Vec3(mVals[0] / L, mVals[1] / L, mVals[2] / L) : Vec3(0.f);
     }
 
+    // Comparison operators
     bool operator==(const Vec3 &vec3) const {
         return mVals[0] == vec3[0] && mVals[1] == vec3[1] && mVals[2] == vec3[2];
     }
 
+    // Component-wise operations
     Vec3 &min(const Vec3 &vec3) {
         for (int i = 0; i < 3; ++i) {
             mVals[i] = std::min(mVals[i], vec3[i]);
@@ -80,6 +125,15 @@ public:
         return *this;
     }
 
+    static Vec3 min(Vec3 const &a, Vec3 const &b) {
+        return {std::min(a[0], b[0]), std::min(a[1], b[1]), std::min(a[2], b[2])};
+    }
+
+    static Vec3 max(Vec3 const &a, Vec3 const &b) {
+        return {std::max(a[0], b[0]), std::max(a[1], b[1]), std::max(a[2], b[2])};
+    }
+
+    // Dot and cross products
     static float dot(Vec3 const &a, Vec3 const &b) {
         return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
     }
@@ -90,46 +144,16 @@ public:
 
     static Vec3 cross(Vec3 const &a, Vec3 const &b) {
         return {a[1] * b[2] - a[2] * b[1],
-                     a[2] * b[0] - a[0] * b[2],
-                     a[0] * b[1] - a[1] * b[0]};
+                a[2] * b[0] - a[0] * b[2],
+                a[0] * b[1] - a[1] * b[0]};
     }
 
-    Vec3 &operator+=(Vec3 const &other) {
-        for (int i = 0; i < 3; ++i) {
-            mVals[i] += other[i];
-        }
-        return *this;
-    }
-
-    Vec3 &operator-=(Vec3 const &other) {
-        for (int i = 0; i < 3; ++i) {
-            mVals[i] -= other[i];
-        }
-        return *this;
-    }
-
-    Vec3 &operator*=(float s) {
-        for (float & mVal : mVals) {
-            mVal *= s;
-        }
-        return *this;
-    }
-
-    Vec3 &operator/=(const float s) {
-        for (float & mVal : mVals) {
-            mVal /= s;
-        }
-        return *this;
-    }
-
-    Vec3 operator/(const Vec3 &other) const {
-        return {mVals[0] / other[0], mVals[1] / other[1], mVals[2] / other[2]};
-    }
-
+    // Component product
     static Vec3 compProduct(Vec3 const &a, Vec3 const &b) {
         return {a[0] * b[0], a[1] * b[1], a[2] * b[2]};
     }
 
+    // Get maximum absolute component index
     [[nodiscard]] unsigned int getMaxAbsoluteComponent() const {
         unsigned int maxIndex = 0;
         for (unsigned int i = 1; i < 3; ++i) {
@@ -140,6 +164,7 @@ public:
         return maxIndex;
     }
 
+    // Get orthogonal vector
     [[nodiscard]] Vec3 getOrthogonal() const {
         const unsigned int c1 = getMaxAbsoluteComponent();
         const unsigned int c2 = (c1 + 1) % 3;
@@ -150,6 +175,7 @@ public:
     }
 };
 
+// Operator overloads
 static inline Vec3 operator+(Vec3 const &a, Vec3 const &b) {
     return {a[0] + b[0], a[1] + b[1], a[2] + b[2]};
 }
@@ -170,6 +196,10 @@ static inline Vec3 operator/(Vec3 const &a, const float b) {
     return {a[0] / b, a[1] / b, a[2] / b};
 }
 
+static inline Vec3 operator/(const float a, Vec3 const &b) {
+    return {a / b[0], a / b[1], a / b[2]};
+}
+
 static inline std::ostream &operator<<(std::ostream &s, Vec3 const &p) {
     return s << p[0] << " " << p[1] << " " << p[2];
 }
@@ -178,11 +208,13 @@ static inline std::istream &operator>>(std::istream &s, Vec3 &p) {
     return s >> p[0] >> p[1] >> p[2];
 }
 
+// Matrix class
 class Mat3 {
 private:
     float vals[9]{};
 
 public:
+    // Constructors
     Mat3() : vals{0.f} {}
 
     Mat3(const float v1, const float v2, const float v3,
@@ -193,6 +225,7 @@ public:
         std::copy_n(m.vals, 9, vals);
     }
 
+    // Matrix-vector multiplication
     Vec3 operator*(const Vec3 &p) const {
         return {
             vals[0] * p[0] + vals[1] * p[1] + vals[2] * p[2],
@@ -201,6 +234,7 @@ public:
         };
     }
 
+    // Matrix multiplication
     Mat3 operator*(const Mat3 &m2) const {
         Mat3 res;
         for (int i = 0; i < 3; ++i) {
@@ -213,18 +247,20 @@ public:
         return res;
     }
 
+    // Check for NaN values
     [[nodiscard]] bool isnan() const {
-        for (const auto &val : vals) {
-            if (std::isnan(val)) return true;
-        }
-        return false;
+        return std::ranges::any_of(vals, [](const auto &val) { return std::isnan(val); });
     }
 
+    // Assignment operator
     Mat3 &operator=(const Mat3 &m) {
-        std::copy_n(m.vals, 9, vals);
+        if (this != &m) {
+            std::copy_n(m.vals, 9, vals);
+        }
         return *this;
     }
 
+    // Matrix addition
     Mat3 &operator+=(const Mat3 &m) {
         for (unsigned int i = 0; i < 9; ++i) {
             vals[i] += m.vals[i];
@@ -232,6 +268,7 @@ public:
         return *this;
     }
 
+    // Matrix subtraction
     Mat3 &operator-=(const Mat3 &m) {
         for (unsigned int i = 0; i < 9; ++i) {
             vals[i] -= m.vals[i];
@@ -239,6 +276,7 @@ public:
         return *this;
     }
 
+    // Matrix division
     Mat3 &operator/=(const double s) {
         for (float & val : vals) {
             val /= static_cast<float>(s);
@@ -246,6 +284,7 @@ public:
         return *this;
     }
 
+    // Matrix multiplication by scalar
     Mat3 &operator*=(const double s) {
         for (float & val : vals) {
             val *= static_cast<float>(s);
@@ -253,6 +292,7 @@ public:
         return *this;
     }
 
+    // Element access
     float &operator()(const unsigned int r, const unsigned int c) {
         return vals[r * 3 + c];
     }
@@ -261,6 +301,7 @@ public:
         return vals[r * 3 + c];
     }
 
+    // Static functions
     static Mat3 identity() {
         return {
             1, 0, 0,
@@ -278,6 +319,7 @@ public:
     }
 };
 
+// Operator overloads for Mat3
 static inline Mat3 operator+(Mat3 const &a, Mat3 const &b) {
     Mat3 res = a;
     res += b;
@@ -300,10 +342,10 @@ static Mat3 operator*(Mat3 const &a, const float s) {
     return a * s;
 }
 
-
 [[maybe_unused]] static std::ostream &operator<<(std::ostream &s, Mat3 const &m) {
-    s << m(0, 0) << " \t" << m(0, 1) << " \t" << m(0, 2) << std::endl << m(1, 0) << " \t" << m(1, 1) << " \t" << m(1, 2)
-      << std::endl << m(2, 0) << " \t" << m(2, 1) << " \t" << m(2, 2) << std::endl;
+    s << m(0, 0) << " \t" << m(0, 1) << " \t" << m(0, 2) << std::endl
+      << m(1, 0) << " \t" << m(1, 1) << " \t" << m(1, 2) << std::endl
+      << m(2, 0) << " \t" << m(2, 1) << " \t" << m(2, 2) << std::endl;
     return s;
 }
 

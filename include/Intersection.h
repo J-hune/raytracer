@@ -9,6 +9,8 @@
 #include "Triangle.h"
 #include <cfloat>
 
+#include "MeshKDTree.h"
+
 struct RaySceneIntersection {
     bool intersectionExists;
     unsigned int typeOfIntersectedObject{};
@@ -23,8 +25,17 @@ struct RaySceneIntersection {
 
 class Intersection {
 public:
-    static RaySceneIntersection computeIntersection(const Ray &ray, const std::vector<Sphere> &spheres, const std::vector<Square> &squares, const std::vector<Mesh> &meshes, float z_near);
-    static std::tuple<Vec3, Vec3, Material> parseIntersection(const RaySceneIntersection &intersection, const std::vector<Sphere> &spheres, const std::vector<Square> &squares, const std::vector<Mesh> &meshes);
+    static RaySceneIntersection computeIntersection(
+        const Ray &ray, const std::vector<Sphere> &spheres, const std::vector<Square> &squares, const std::vector<Mesh> &meshes,
+        const MeshKDTree &kd_tree, float z_near
+    );
+
+    static std::tuple<Vec3, Vec3, Material> parseIntersection(
+        const RaySceneIntersection &intersection,
+        const std::vector<Sphere> &spheres,
+        const std::vector<Square> &squares,
+        const std::vector<Mesh> &meshes
+    );
 };
 
 #endif // INTERSECTION_H

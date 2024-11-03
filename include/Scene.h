@@ -1,15 +1,15 @@
 #ifndef SCENE_H
 #define SCENE_H
 
-#include <cmath>
 #include <map>
 #include <vector>
 #include <string>
+
 #include "Mesh.h"
 #include "Sphere.h"
 #include "Square.h"
 #include "Light.h"
-#include "KDTree.h"
+#include "MeshKDTree.h"
 #include "Settings.h"
 #include "Intersection.h"
 #include "Lighting.h"
@@ -25,7 +25,7 @@ class Scene {
     float directIlluminationReinhardKey = 0.0f;
     float causticsReinhardKey = 0.0f;
     bool drawCaustics = true;
-
+    MeshKDTree kdTree;
 public:
     Scene() = default;
 
@@ -40,14 +40,12 @@ public:
         if (settings.drawDebugPhotons) photonMap.debugDrawPhotons();
         if (!photonsEmitted && settings.caustics && drawCaustics) {
             std::cout << "Emitting photons, the application will freeze for a few seconds..." << std::endl;
-            photonMap.emitPhotons(lights, spheres, squares, meshes, settings.photons);
+            photonMap.emitPhotons(lights, spheres, squares, meshes, kdTree, settings.photons);
             photonsEmitted = true;
         }
 
-        if (settings.drawDebugAABBs) {
-            for (const auto &sphere: spheres) sphere.aabb.draw();
-            for (const auto &square: squares) square.aabb.draw();
-            for (const auto &mesh: meshes) mesh.aabb.draw();
+        if (settings.useKDTree && settings.drawDebugAABBs) {
+            kdTree.draw();
         }
     }
 
@@ -71,7 +69,7 @@ public:
         };
 
         // Compute the intersection with the scene (ray vs. (spheres, squares, meshes))
-        const RaySceneIntersection intersection = Intersection::computeIntersection(ray, spheres, squares, meshes, z_near);
+        const RaySceneIntersection intersection = Intersection::computeIntersection(ray, spheres, squares, meshes, kdTree, z_near);
 
         // If there isn't any intersection, return the background color
         if (!intersection.intersectionExists) {
@@ -138,7 +136,7 @@ public:
 
         // Ray to test the shadow
         const Ray shadowRay(intersectionPoint + normal * epsilon, lightDir);
-        const RaySceneIntersection shadowIntersection = Intersection::computeIntersection(shadowRay, spheres, squares, meshes, epsilon);
+        const RaySceneIntersection shadowIntersection = Intersection::computeIntersection(shadowRay, spheres, squares, meshes, kdTree, epsilon);
 
         // If the point is in shadow, skip the light
         if (shadowIntersection.intersectionExists && shadowIntersection.t < lightDistance) {
@@ -163,8 +161,7 @@ public:
 
             // Ray to test the shadow
             Ray shadowRay(intersectionPoint + normal * epsilon, shadowDir);
-            const RaySceneIntersection shadowIntersection = Intersection::computeIntersection(
-                shadowRay, spheres, squares, meshes, epsilon);
+            const RaySceneIntersection shadowIntersection = Intersection::computeIntersection(shadowRay, spheres, squares, meshes, kdTree, epsilon);
 
             // If the point is in shadow, increment the shadow factor
             if (shadowIntersection.intersectionExists && shadowIntersection.t < shadowDistance) {
@@ -255,6 +252,7 @@ public:
     }
 
     void setup_cornell_box_mesh() {
+        const Settings &settings = Settings::getInstance();
         directIlluminationReinhardKey = 0.9f;
         causticsReinhardKey = 0.0002f;
         // 500000 photons => 0.0001f
@@ -262,6 +260,9 @@ public:
         setup_cornell_box();
         addMesh("../data/epcot.off", Vec3(0.0, -0.4, 0.0), Vec3(1.f),
             Material_Mirror, Vec3(0.f), Vec3(1.f), 16, 0.0, 1.5);
+
+        // Construct the KD-Tree
+        if (settings.useKDTree) kdTree = MeshKDTree(meshes);
     }
 
 

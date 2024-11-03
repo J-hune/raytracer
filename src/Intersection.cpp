@@ -1,7 +1,12 @@
 #include "../include/Intersection.h"
 #include <cfloat>
 
-RaySceneIntersection Intersection::computeIntersection(const Ray &ray, const std::vector<Sphere> &spheres, const std::vector<Square> &squares, const std::vector<Mesh> &meshes, float z_near) {
+#include "../include/MeshKDTree.h"
+#include "../include/Settings.h"
+
+RaySceneIntersection Intersection::computeIntersection(const Ray &ray, const std::vector<Sphere> &spheres,
+const std::vector<Square> &squares, const std::vector<Mesh> &meshes, const MeshKDTree &kd_tree, const float z_near) {
+    const Settings &settings = Settings::getInstance();
     RaySceneIntersection result;
     result.t = FLT_MAX;
 
@@ -42,21 +47,40 @@ RaySceneIntersection Intersection::computeIntersection(const Ray &ray, const std
         }
     }
 
-    for (unsigned int i = 0; i < meshes.size(); i++) {
-        // We first check if the ray intersects an AABB around the mesh
-        if (!meshes[i].intersectAABB(ray)) {
-            continue;
+    // Compute the intersection with the KD tree
+    if (settings.useKDTree) {
+        RayTriangleIntersection intersection;
+        if (!kd_tree.isEmpty() && kd_tree.intersect(ray, intersection)) {
+            // If the intersection exists and is closer than the previous one, keep it
+            if (intersection.intersectionExists && intersection.t <= result.t && intersection.t > z_near) {
+                result.intersectionExists = true;
+                result.rayMeshIntersection = intersection;
+                result.t = intersection.t;
+                result.objectIndex = intersection.tIndex;
+                result.typeOfIntersectedObject = 2;
+            }
         }
+    }
 
-        const RayIntersection intersection = meshes[i].intersect(ray);
+    // I'm keeping the old mesh intersection implementation (without KD-Tree) for rendering time comparisons.
+    // And also because I'm a little sentimental about it. :')
+    else {
+        for (unsigned int i = 0; i < meshes.size(); i++) {
+            // We first check if the ray intersects an AABB around the mesh
+            if (!meshes[i].intersectAABB(ray)) {
+                continue;
+            }
 
-        // If the intersection exists and is closer than the previous one, keep it
-        if (intersection.intersectionExists && intersection.t <= result.t && intersection.t > z_near) {
-            result.intersectionExists = true;
-            result.rayMeshIntersection = static_cast<RayTriangleIntersection>(intersection);
-            result.t = intersection.t;
-            result.objectIndex = i;
-            result.typeOfIntersectedObject = 2;
+            const RayIntersection intersection = meshes[i].intersect(ray);
+
+            // If the intersection exists and is closer than the previous one, keep it
+            if (intersection.intersectionExists && intersection.t <= result.t && intersection.t > z_near) {
+                result.intersectionExists = true;
+                result.rayMeshIntersection = static_cast<RayTriangleIntersection>(intersection);
+                result.t = intersection.t;
+                result.objectIndex = i;
+                result.typeOfIntersectedObject = 2;
+            }
         }
     }
 

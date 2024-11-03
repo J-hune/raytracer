@@ -4,23 +4,21 @@
 #include <random>
 #include <vector>
 #include <string>
+#include <stdexcept>
+
 #include "Vec3.h"
 #include "Material.h"
 #include "AABB.h"
 #include "Ray.h"
-#include <stdexcept>
-
-// Forward declaration of Ray class
-class Ray;
+#include "Triangle.h"
 
 // -------------------------------------------
-// Basic Mesh class
+// MeshVertex Structure
 // -------------------------------------------
-
 struct MeshVertex {
-    Vec3 position; // position
-    Vec3 normal;   // normal
-    float u, v;    // UV coordinates
+    Vec3 position;
+    Vec3 normal;
+    float u, v;
 
     MeshVertex() : u(0), v(0) {}
     MeshVertex(const Vec3& _p, const Vec3& _n) : position(_p), normal(_n), u(0), v(0) {}
@@ -29,6 +27,9 @@ struct MeshVertex {
     MeshVertex& operator=(const MeshVertex& vertex) = default;
 };
 
+// -------------------------------------------
+// MeshTriangle Structure
+// -------------------------------------------
 struct MeshTriangle {
     unsigned int v[3]; // vertex indices
 
@@ -40,9 +41,11 @@ struct MeshTriangle {
     unsigned int operator[](const unsigned int iv) const { return v[iv]; }
 };
 
+// -------------------------------------------
+// Mesh Class
+// -------------------------------------------
 class Mesh {
 protected:
-
     std::vector<float> positions_array;
     std::vector<float> normals_array;
     std::vector<float> uvs_array;
@@ -58,6 +61,22 @@ public:
 
     [[nodiscard]] Vec3 getPosition() const {
         return aabb.center();
+    }
+
+    [[nodiscard]] std::vector<Triangle> getTriangles() const {
+        std::vector<Triangle> meshTriangles;
+        meshTriangles.reserve(triangles.size());
+
+        // Convert mesh triangles to triangles
+        for (const MeshTriangle& triangle : triangles) {
+            const MeshVertex& v0 = vertices[triangle[0]];
+            const MeshVertex& v1 = vertices[triangle[1]];
+            const MeshVertex& v2 = vertices[triangle[2]];
+
+            meshTriangles.emplace_back(v0.position, v1.position, v2.position);
+        }
+
+        return meshTriangles;
     }
 
     void loadOFF(const std::string& filename);
