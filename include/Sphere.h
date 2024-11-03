@@ -101,9 +101,6 @@ public:
     }
 
     [[nodiscard]] bool intersectAABB(const Ray &ray) const override {
-        if (aabb.min == aabb.max) {
-            exit(1);
-        }
         // Check if the ray intersects the sphere's AABB
         return ray.intersectAABB(aabb);
     }

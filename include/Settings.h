@@ -27,6 +27,7 @@ public:
     bool refractions = true;
     bool caustics = true;
     mutable bool drawDebugPhotons = false;
+    mutable bool drawDebugAABBs = false;
     TypeOfFloor floorType = CHECKERBOARD;
 
 private:

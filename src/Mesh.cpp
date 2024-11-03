@@ -125,12 +125,15 @@ void Mesh::translate(const Vec3& translation) {
     for (auto& vertex : vertices) {
         vertex.position += translation;
     }
+
+    computeAABB();
 }
 
 void Mesh::applyTransformationMatrix(const Mat3& transform) {
     for (auto& vertex : vertices) {
         vertex.position = transform * vertex.position;
     }
+    computeAABB();
 }
 
 void Mesh::scale(const Vec3 &scale) {
@@ -224,14 +227,14 @@ void Mesh::computeAABB() {
 
 [[nodiscard]]
 bool Mesh::intersectAABB(const Ray& ray) const {
-    float tmin = (aabb.min[0] - ray.origin()[0]) / ray.direction()[0];
-    float tmax = (aabb.max[0] - ray.origin()[0]) / ray.direction()[0];
+    float tmin = (aabb.getMin()[0] - ray.origin()[0]) / ray.direction()[0];
+    float tmax = (aabb.getMax()[0] - ray.origin()[0]) / ray.direction()[0];
 
     if (tmin > tmax) std::swap(tmin, tmax);
 
     for (int i = 1; i < 3; ++i) {
-        float t1 = (aabb.min[i] - ray.origin()[i]) / ray.direction()[i];
-        float t2 = (aabb.max[i] - ray.origin()[i]) / ray.direction()[i];
+        float t1 = (aabb.getMin()[i] - ray.origin()[i]) / ray.direction()[i];
+        float t2 = (aabb.getMax()[i] - ray.origin()[i]) / ray.direction()[i];
 
         if (t1 > t2) std::swap(t1, t2);
 
@@ -251,7 +254,7 @@ RayIntersection Mesh::intersect(const Ray& ray) const {
 
     for (const auto& triangle : triangles) {
         Triangle tri(vertices[triangle.v[0]].position, vertices[triangle.v[1]].position, vertices[triangle.v[2]].position);
-        const RayTriangleIntersection intersection = tri.intersect(ray);
+        const RayIntersection intersection = tri.intersect(ray);
 
         if (intersection.intersectionExists && intersection.t < closestIntersection.t) {
             closestIntersection.intersectionExists = true;
