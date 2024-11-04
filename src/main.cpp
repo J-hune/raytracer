@@ -72,11 +72,11 @@ void printUsage() {
         << "  ?   : Display help" << endl
         << "  w   : Toggle Wireframe Mode" << endl
         << "  f   : Toggle Full Screen Mode" << endl
-        << "  p   : Quick Render" << endl
-        << "  r   : Render Render" << endl
+        << "  q   : Quick Render" << endl
+        << "  r   : Render" << endl
         << "  +   : Switch Scene" << endl
-        << "  d   : Draw Debug Photons" << endl
-        << "  a   : Draw Debug AABBs" << endl
+        << "  p   : Draw Debug Photons" << endl
+        << "  a   : Draw Debug Axis-Aligned Bounding Boxes (AABBs)" << endl
         << endl
         << "Mouse Controls:" << endl
         << "---------------" << endl
@@ -382,10 +382,9 @@ void keyboard(const unsigned char key, int _x, int _y) {
         case 'a':
             settings.drawDebugAABBs = !settings.drawDebugAABBs;
             break;
-        case 'd':
-            settings.drawDebugPhotons = !settings.drawDebugPhotons;
+        case 'p':
+            settings.drawDebugPhotons = (settings.drawDebugPhotons + 1) % 3;
             break;
-        case 'q':
         case 27:
             exit(0);
         case 'w':
@@ -396,7 +395,7 @@ void keyboard(const unsigned char key, int _x, int _y) {
             else
                 glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
             break;
-        case 'p':
+        case 'q':
             camera.apply();
             rays.clear();
             fast_ray_trace_from_camera(settings);
@@ -482,7 +481,7 @@ int main(int argc, char **argv) {
     settings.caustics = true;
     settings.reflections = true;
     settings.refractions = true;
-    settings.drawDebugPhotons = true;
+    settings.drawDebugPhotons = 1; // 0: Do not draw photons, 1: Draw photons, 2: Draw photons and light paths
     settings.drawDebugAABBs = false;
     settings.useKDTree = true;
     settings.maxKdTreeDepth = 12;
