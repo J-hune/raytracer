@@ -3,7 +3,6 @@
 #include "../include/Lighting.h"
 #include <cmath>
 #include <thread>
-#include <utility>
 #include <GL/gl.h>
 
 /******************************************************************************************************************/
@@ -85,18 +84,17 @@ void PhotonMap::emitPhotonsForThread(
             // Compute intersection of the ray with the scene and extract intersection data
             RaySceneIntersection intersection = Intersection::computeIntersection(ray, spheres, squares, meshes, kdTree, 0.0f);
             if (!intersection.intersectionExists) break;
-            auto [intersectionPoint, normal, material] = Intersection::parseIntersection(intersection, spheres, squares, meshes);
 
             // Calculate distance traveled by photon and attenuation
-            const float distanceTraveled = (intersectionPoint - photon.position).length();
-            photon.position = intersectionPoint;
+            const float distanceTraveled = (intersection.intersection - photon.position).length();
+            photon.position = intersection.intersection;
             float attenuationFactor = 1.0f;
 
             // Apply attenuation based on material type
-            if (material.type == Material_Diffuse_Blinn_Phong || material.type == Material_Mirror) {
+            if (intersection.material.type == Material_Diffuse_Blinn_Phong || intersection.material.type == Material_Mirror) {
                 constexpr float absorptionCoefficientAir = 0.02f;
                 attenuationFactor = std::exp(-distanceTraveled * absorptionCoefficientAir);
-            } else if (material.type == Material_Glass) {
+            } else if (intersection.material.type == Material_Glass) {
                 constexpr float absorptionCoefficientGlass = 0.1f;
                 attenuationFactor = std::exp(-distanceTraveled * absorptionCoefficientGlass);
             }
@@ -104,7 +102,7 @@ void PhotonMap::emitPhotonsForThread(
             photon.color *= attenuationFactor; // Adjust photon color by attenuation
 
             // Handle photon behavior based on material type
-            switch (material.type) {
+            switch (intersection.material.type) {
                 case Material_Diffuse_Blinn_Phong:
                     if (photon.materialType == Material_Glass) {
                         threadGlassPhotons.emplace_back(photon);
@@ -115,10 +113,10 @@ void PhotonMap::emitPhotonsForThread(
                     }
                     break;
                 case Material_Glass:
-                    processGlassPhoton(photon, normal, material, threadPhotonsToEmit);
+                    processGlassPhoton(photon, intersection.normal, intersection.material, threadPhotonsToEmit);
                     break;
                 case Material_Mirror:
-                    processMirrorPhoton(photon, normal, material);
+                    processMirrorPhoton(photon, intersection.normal, intersection.material);
                     break;
             }
         }

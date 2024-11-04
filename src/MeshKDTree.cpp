@@ -92,7 +92,7 @@ bool MeshKDTree::traverseTree(const MeshKDNode *node, const Ray &ray, RayTriangl
     if (node->left == nullptr && node->right == nullptr) {
         bool intersectionFound = false;
         for (const auto &triangle : node->triangles) {
-            RayTriangleIntersection currentIntersection = triangle.intersect(ray);
+            const RayTriangleIntersection currentIntersection = triangle.intersect(ray);
             if (currentIntersection.intersectionExists && currentIntersection.t < intersection.t) {
                 intersection = currentIntersection;
                 intersectionFound = true;
