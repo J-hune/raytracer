@@ -234,9 +234,9 @@ Vec3 PhotonMap::randomDirection(std::mt19937 &rng, const std::vector<Sphere>& sp
         const Sphere& sphere = spheres[objectIndex];
         const float theta = dist(rng) * 2.0f * M_PIf;
         const float phi = std::acos(2.0f * dist(rng) - 1.0f);
-        const float x = (sphere.m_radius * 1.01f) * std::sin(phi) * std::cos(theta);
-        const float y = (sphere.m_radius * 1.01f) * std::sin(phi) * std::sin(theta);
-        const float z = (sphere.m_radius * 1.01f) * std::cos(phi);
+        const float x = sphere.m_radius * std::sin(phi) * std::cos(theta);
+        const float y = sphere.m_radius * std::sin(phi) * std::sin(theta);
+        const float z = sphere.m_radius * std::cos(phi);
         target = sphere.m_center + Vec3(x, y, z);
     } else {
         // Select a random point on the mesh
@@ -255,10 +255,11 @@ Vec3 PhotonMap::randomDirection(std::mt19937 &rng, const std::vector<Sphere>& sp
 /******************************************************************************************************************/
 
 void PhotonMap::debugDrawPhotons() const {
+    glDisable(GL_LIGHTING);
     glEnable(GL_COLOR_MATERIAL);
 
     for (Photon photon : initialPhotons) {
-        glColor3f(0.5f, 0.5f, 1.0f);
+        glColor3f(0.5f, 0.5f, 0.5f);
         glBegin(GL_LINES);
         glVertex3f(photon.position[0], photon.position[1], photon.position[2]);
 
@@ -273,7 +274,7 @@ void PhotonMap::debugDrawPhotons() const {
     // Debug: Draw the photons
     std::vector<Photon> photons = mirrorPhotonTree.toVector();
     for (const auto &[position, direction, color, materialType] : photons) {
-        glColor3f(0.0f, 0.4f, 0.4f);
+        glColor3f(color[0], color[1], color[2]);
         glBegin(GL_POINTS);
         glVertex3f(position[0], position[1], position[2]);
         glEnd();
@@ -281,11 +282,12 @@ void PhotonMap::debugDrawPhotons() const {
 
     std::vector<Photon> glassPhotons = glassPhotonTree.toVector();
     for (const auto &[position, direction, color, materialType] : glassPhotons) {
-        glColor3f(0.0f, 0.3f, 0.8f);
+        glColor3f(0.0f, 0.3f, 1.0f);
         glBegin(GL_POINTS);
         glVertex3f(position[0], position[1], position[2]);
         glEnd();
     }
 
     glDisable(GL_COLOR_MATERIAL);
+    glEnable(GL_LIGHTING);
 }

@@ -6,6 +6,22 @@
 #include <fstream>
 #include <GL/gl.h>
 
+std::vector<Triangle> Mesh::getTriangles() const {
+    std::vector<Triangle> meshTriangles;
+    meshTriangles.reserve(triangles.size());
+
+    // Convert mesh triangles to triangles
+    for (const MeshTriangle& triangle : triangles) {
+        const MeshVertex& v0 = vertices[triangle[0]];
+        const MeshVertex& v1 = vertices[triangle[1]];
+        const MeshVertex& v2 = vertices[triangle[2]];
+
+        meshTriangles.emplace_back(v0.position, v1.position, v2.position);
+    }
+
+    return meshTriangles;
+}
+
 // Load mesh from OFF file
 void Mesh::loadOFF(const std::string& filename) {
     std::ifstream in(filename);
@@ -211,6 +227,33 @@ void Mesh::draw() const {
     glDrawElements(GL_TRIANGLES, triangles_array.size(), GL_UNSIGNED_INT, (GLvoid*)(triangles_array.data()));
 }
 
+MeshVertex Mesh::getRandomPointOnSurface(std::mt19937 &rng) const {
+    if (triangles.empty() || vertices.empty()) {
+        throw std::runtime_error("Mesh has no triangles or vertices.");
+    }
+
+    std::uniform_int_distribution<size_t> triangleDist(0, triangles.size() - 1);
+    const MeshTriangle& triangle = triangles[triangleDist(rng)];
+
+    const MeshVertex& v0 = vertices[triangle[0]];
+    const MeshVertex& v1 = vertices[triangle[1]];
+    const MeshVertex& v2 = vertices[triangle[2]];
+
+    std::uniform_real_distribution<float> dist(0.0f, 1.0f);
+    float u = dist(rng);
+    float v = dist(rng);
+
+    if (u + v > 1.0f) {
+        u = 1.0f - u;
+        v = 1.0f - v;
+    }
+
+    const Vec3 position = v0.position * (1.0f - u - v) + v1.position * u + v2.position * v;
+    const Vec3 normal = v0.normal * (1.0f - u - v) + v1.normal * u + v2.normal * v;
+
+    return {position, normal};
+}
+
 void Mesh::computeAABB() {
     Vec3 min = vertices[0].position;
     Vec3 max = vertices[0].position;
@@ -225,8 +268,7 @@ void Mesh::computeAABB() {
     aabb = AABB(min, max);
 }
 
-[[nodiscard]]
-bool Mesh::intersectAABB(const Ray& ray) const {
+[[nodiscard]] bool Mesh::intersectAABB(const Ray& ray) const {
     float tmin = (aabb.getMin()[0] - ray.origin()[0]) / ray.direction()[0];
     float tmax = (aabb.getMax()[0] - ray.origin()[0]) / ray.direction()[0];
 

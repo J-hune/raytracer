@@ -4,6 +4,13 @@
 #include "Vec3.h"
 #include <GL/gl.h>
 
+/**
+ * Template function to invert a 4x4 matrix.
+ * @tparam T The type of the matrix elements.
+ * @param m The input matrix to be inverted.
+ * @param invOut The output matrix which will contain the inverted matrix.
+ * @return True if the matrix was successfully inverted, false otherwise.
+ */
 template<typename T>
 bool invertMatrix(const T m[16], T invOut[16]) {
     T inv[16], det;
@@ -131,6 +138,19 @@ bool invertMatrix(const T m[16], T invOut[16]) {
     return true;
 }
 
+/**
+ * Template function to multiply a 4x4 matrix with a 4D vector.
+ * @tparam T The type of the matrix and vector elements.
+ * @param m The input matrix.
+ * @param x The x component of the input vector.
+ * @param y The y component of the input vector.
+ * @param z The z component of the input vector.
+ * @param w The w component of the input vector.
+ * @param resX The x component of the resulting vector.
+ * @param resY The y component of the resulting vector.
+ * @param resZ The z component of the resulting vector.
+ * @param resW The w component of the resulting vector.
+ */
 template<class T>
 void mult(const T m[16], T x, T y, T z, T w, T &resX, T &resY, T &resZ, T &resW) {
     resX = m[0] * x + m[4] * y + m[8] * z + m[12] * w;
@@ -139,6 +159,13 @@ void mult(const T m[16], T x, T y, T z, T w, T &resX, T &resY, T &resZ, T &resW)
     resW = m[3] * x + m[7] * y + m[11] * z + m[15] * w;
 }
 
+/**
+ * Template function to multiply a 4x4 matrix with a 4D vector.
+ * @tparam T The type of the matrix and vector elements.
+ * @param m The input matrix.
+ * @param x The input vector.
+ * @param res The resulting vector.
+ */
 template<class T>
 void mult(const T m[16], T x[4], T res[4]) {
     res[0] = m[0] * x[0] + m[4] * x[1] + m[8] * x[2] + m[12] * x[3];
@@ -150,7 +177,10 @@ void mult(const T m[16], T x[4], T res[4]) {
 // Global matrices
 inline GLdouble modelView[16], projection[16], modelViewInverse[16], projectionInverse[16], nearAndFarPlanes[2];
 
-// Function to initialize matrices
+/**
+ * Function to initialize the global matrices.
+ * Retrieves the current model view and projection matrices from OpenGL and computes their inverses.
+ */
 inline void initializeMatrices() {
     glMatrixMode(GL_MODELVIEW);
     glGetDoublev(GL_MODELVIEW_MATRIX, modelView);
@@ -164,12 +194,23 @@ inline void initializeMatrices() {
     glMatrixMode(GL_MODELVIEW);
 }
 
+/**
+ * Converts a point from camera space to world space.
+ * @param pCS The point in camera space.
+ * @return The point in world space.
+ */
 inline Vec3 cameraSpaceToWorldSpace(const Vec3& pCS) {
     GLdouble res[4];
     mult(modelViewInverse, static_cast<GLdouble>(pCS[0]), static_cast<GLdouble>(pCS[1]), static_cast<GLdouble>(pCS[2]), 1.0, res[0], res[1], res[2], res[3]);
     return {static_cast<float>(res[0] / res[3]), static_cast<float>(res[1] / res[3]), static_cast<float>(res[2] / res[3])};
 }
 
+/**
+ * Converts screen space coordinates to world space coordinates.
+ * @param u The x coordinate in screen space.
+ * @param v The y coordinate in screen space.
+ * @return The point in world space.
+ */
 inline Vec3 screenSpaceToWorldSpace(const float u, const float v) {
     GLdouble resIntermediate[4];
     mult(projectionInverse , static_cast<GLdouble>(2.f)*u - 1.f , -(static_cast<GLdouble>(2.f)*v - 1.f) , nearAndFarPlanes[0] , 1.0 , resIntermediate[0] , resIntermediate[1] , resIntermediate[2] , resIntermediate[3]);
@@ -179,6 +220,13 @@ inline Vec3 screenSpaceToWorldSpace(const float u, const float v) {
     return {static_cast<float>(res[0] / res[3]), static_cast<float>(res[1] / res[3]), static_cast<float>(res[2] / res[3])};
 }
 
+/**
+ * Computes a ray from screen space coordinates.
+ * @param u The x coordinate in screen space.
+ * @param v The y coordinate in screen space.
+ * @param position The starting position of the ray in world space.
+ * @param direction The direction of the ray in world space.
+ */
 inline void screenSpaceToWorldSpaceRay(const float u, const float v, Vec3& position, Vec3& direction) {
     position = cameraSpaceToWorldSpace(Vec3(0, 0, 0));
     direction = screenSpaceToWorldSpace(u, v) - position;

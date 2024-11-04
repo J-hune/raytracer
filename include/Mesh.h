@@ -4,7 +4,6 @@
 #include <random>
 #include <vector>
 #include <string>
-#include <stdexcept>
 
 #include "Vec3.h"
 #include "Material.h"
@@ -15,121 +14,210 @@
 // -------------------------------------------
 // MeshVertex Structure
 // -------------------------------------------
+
+/**
+ * Structure representing a vertex in a mesh.
+ */
 struct MeshVertex {
-    Vec3 position;
-    Vec3 normal;
-    float u, v;
+    Vec3 position;  ///< Position of the vertex.
+    Vec3 normal;    ///< Normal vector at the vertex.
+    float u, v;     ///< Texture coordinates.
 
     MeshVertex() : u(0), v(0) {}
     MeshVertex(const Vec3& _p, const Vec3& _n) : position(_p), normal(_n), u(0), v(0) {}
     MeshVertex(const Vec3& _p, const Vec3& _n, const float _u, const float _v) : position(_p), normal(_n), u(_u), v(_v) {}
     MeshVertex(const MeshVertex& vertex) = default;
+
+    /**
+     * Assignment operator for MeshVertex.
+     * @param vertex The vertex to assign.
+     * @return Reference to the assigned vertex.
+     */
     MeshVertex& operator=(const MeshVertex& vertex) = default;
 };
 
 // -------------------------------------------
 // MeshTriangle Structure
 // -------------------------------------------
+
+/**
+ * Structure representing a triangle in a mesh.
+ */
 struct MeshTriangle {
-    unsigned int v[3]; // vertex indices
+    unsigned int v[3]; ///< Indices of the vertices forming the triangle.
 
     MeshTriangle() : v{0, 0, 0} {}
     MeshTriangle(const unsigned int v0, const unsigned int v1, const unsigned int v2) : v{v0, v1, v2} {}
     MeshTriangle(const MeshTriangle& t) = default;
+
+    /**
+     * Assignment operator for MeshTriangle.
+     * @param t The triangle to assign.
+     * @return Reference to the assigned triangle.
+     */
     MeshTriangle& operator=(const MeshTriangle& t) = default;
+
+    /**
+     * Access operator for vertex indices.
+     * @param iv Index of the vertex to access.
+     * @return Reference to the vertex index.
+     */
     unsigned int& operator[](const unsigned int iv) { return v[iv]; }
+
+    /**
+     * Access operator for vertex indices (const version).
+     * @param iv Index of the vertex to access.
+     * @return The vertex index.
+     */
     unsigned int operator[](const unsigned int iv) const { return v[iv]; }
 };
 
 // -------------------------------------------
 // Mesh Class
 // -------------------------------------------
+
+/**
+ * Class representing a mesh.
+ */
 class Mesh {
 protected:
-    std::vector<float> positions_array;
-    std::vector<float> normals_array;
-    std::vector<float> uvs_array;
-    std::vector<unsigned int> triangles_array;
+    std::vector<float> positions_array;         ///< Array of vertex positions.
+    std::vector<float> normals_array;           ///< Array of vertex normals.
+    std::vector<float> uvs_array;               ///< Array of texture coordinates.
+    std::vector<unsigned int> triangles_array;  ///< Array of triangle vertex indices.
 
 public:
     virtual ~Mesh() = default;
 
-    std::vector<MeshVertex> vertices;
-    std::vector<MeshTriangle> triangles;
-    Material material;
-    AABB aabb;
+    std::vector<MeshVertex> vertices;       ///< List of vertices in the mesh.
+    std::vector<MeshTriangle> triangles;    ///< List of triangles in the mesh.
+    Material material;                      ///< Material properties of the mesh.
+    AABB aabb;                              ///< Axis-aligned bounding box of the mesh.
 
-    [[nodiscard]] Vec3 getPosition() const {
-        return aabb.center();
-    }
+    /**
+     * Gets the position of the mesh.
+     * @return The center of the axis-aligned bounding box.
+     */
+    [[nodiscard]] Vec3 getPosition() const { return aabb.center(); }
 
-    [[nodiscard]] std::vector<Triangle> getTriangles() const {
-        std::vector<Triangle> meshTriangles;
-        meshTriangles.reserve(triangles.size());
+    /**
+     * Gets the list of triangles in the mesh.
+     * @return The list of triangles.
+     */
+    [[nodiscard]] std::vector<Triangle> getTriangles() const;
 
-        // Convert mesh triangles to triangles
-        for (const MeshTriangle& triangle : triangles) {
-            const MeshVertex& v0 = vertices[triangle[0]];
-            const MeshVertex& v1 = vertices[triangle[1]];
-            const MeshVertex& v2 = vertices[triangle[2]];
-
-            meshTriangles.emplace_back(v0.position, v1.position, v2.position);
-        }
-
-        return meshTriangles;
-    }
-
+    /**
+     * Loads a mesh from an OFF file.
+     * @param filename The name of the OFF file.
+     */
     void loadOFF(const std::string& filename);
 
-    MeshVertex getRandomPointOnSurface(std::mt19937 &rng) const {
-        if (triangles.empty() || vertices.empty()) {
-            throw std::runtime_error("Mesh has no triangles or vertices.");
-        }
+    /**
+     * Gets a random point on the surface of the mesh.
+     * @param rng A random number generator.
+     * @return A random point on the surface.
+     */
+    MeshVertex getRandomPointOnSurface(std::mt19937 &rng) const;
 
-        std::uniform_int_distribution<size_t> triangleDist(0, triangles.size() - 1);
-        const MeshTriangle& triangle = triangles[triangleDist(rng)];
-
-        const MeshVertex& v0 = vertices[triangle[0]];
-        const MeshVertex& v1 = vertices[triangle[1]];
-        const MeshVertex& v2 = vertices[triangle[2]];
-
-        std::uniform_real_distribution<float> dist(0.0f, 1.0f);
-        float u = dist(rng);
-        float v = dist(rng);
-
-        if (u + v > 1.0f) {
-            u = 1.0f - u;
-            v = 1.0f - v;
-        }
-
-        Vec3 position = v0.position * (1.0f - u - v) + v1.position * u + v2.position * v;
-        Vec3 normal = v0.normal * (1.0f - u - v) + v1.normal * u + v2.normal * v;
-
-        return MeshVertex(position, normal);
-    }
-
+    /**
+     * Recomputes the normals of the mesh.
+     */
     void recomputeNormals();
+
+    /**
+     * Centers the mesh and scales it to unit size.
+     */
     void centerAndScaleToUnit();
-    void scaleUnit();
 
+    /**
+     * Translates the mesh.
+     * @param translation The translation vector.
+     */
     void translate(const Vec3& translation);
+
+    /**
+     * Applies a transformation matrix to the mesh.
+     * @param transform The transformation matrix.
+     */
     void applyTransformationMatrix(const Mat3& transform);
+
+    /**
+     * Scales the mesh.
+     * @param scale The scale vector.
+     */
     void scale(const Vec3& scale);
+
+    /**
+     * Rotates the mesh around the X axis.
+     * @param angle The rotation angle in radians.
+     */
     void rotateX(float angle);
+
+    /**
+     * Rotates the mesh around the Y axis.
+     * @param angle The rotation angle in radians.
+     */
     void rotateY(float angle);
+
+    /**
+     * Rotates the mesh around the Z axis.
+     * @param angle The rotation angle in radians.
+     */
     void rotateZ(float angle);
-    void draw() const;
 
-    virtual void computeAABB();
-    [[nodiscard]] virtual bool intersectAABB(const Ray& ray) const;
-    [[nodiscard]] virtual RayIntersection intersect(const Ray& ray) const;
-
+    /**
+     * Builds the arrays for rendering the mesh.
+     */
     virtual void buildArrays();
 
+    /**
+     * Draws the mesh.
+     */
+    void draw() const;
+
+    /**
+     * Computes the axis-aligned bounding box of the mesh.
+     */
+    virtual void computeAABB();
+
+    /**
+     * Checks if a ray intersects the axis-aligned bounding box of the mesh.
+     * @param ray The ray to check.
+     * @return True if the ray intersects the bounding box, false otherwise.
+     */
+    [[nodiscard]] virtual bool intersectAABB(const Ray& ray) const;
+
+    /**
+     * Checks if a ray intersects the mesh.
+     * @param ray The ray to check.
+     * @return The intersection information.
+     */
+    [[nodiscard]] virtual RayIntersection intersect(const Ray& ray) const;
+
+    /**
+     * Draws the axis-aligned bounding box of the mesh.
+     */
+    void drawAABB() const;
+
 private:
+    /**
+     * Builds the array of vertex positions.
+     */
     void buildPositionsArray();
+
+    /**
+     * Builds the array of vertex normals.
+     */
     void buildNormalsArray();
+
+    /**
+     * Builds the array of texture coordinates.
+     */
     void buildUVsArray();
+
+    /**
+     * Builds the array of triangle vertex indices.
+     */
     void buildTrianglesArray();
 };
 

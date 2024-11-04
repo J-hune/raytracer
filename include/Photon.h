@@ -4,12 +4,23 @@
 #include "Material.h"
 #include "Vec3.h"
 
-struct Photon {
-    Vec3 position;
-    Vec3 direction;
-    Vec3 color;
-    MaterialType materialType;
+// -------------------------------------------
+// Photon Structure
+// -------------------------------------------
 
+/**
+ * Structure representing a photon.
+ */
+struct Photon {
+    Vec3 position;              ///< Position of the photon.
+    Vec3 direction;             ///< Direction of the photon.
+    Vec3 color;                 ///< Color of the photon.
+    MaterialType materialType;  ///< Material type of the photon.
+
+    /**
+     * Gets the position of the photon.
+     * @return The position of the photon.
+     */
     [[nodiscard]] Vec3 getPosition() const { return position; }
 };
 
