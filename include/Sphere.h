@@ -6,21 +6,36 @@
 #include <cmath>
 #include <vector>
 
-// Struct to hold the results of a ray-sphere intersection
+// -------------------------------------------
+// RaySphereIntersection Structure
+// -------------------------------------------
+
+/**
+ * Structure to hold the results of a ray-sphere intersection.
+ */
 struct RaySphereIntersection : RayIntersection {
     float theta{}, phi{};
     Vec3 secondIntersection;
 };
 
-// Sphere class representing a 3D sphere mesh
-class Sphere : public Mesh {
+// -------------------------------------------
+// Sphere Class
+// -------------------------------------------
+
+/**
+ * Sphere class representing a 3D sphere mesh.
+ */
+class Sphere final : public Mesh {
 public:
-    Vec3 m_center; // Center of the sphere
-    float m_radius{}; // Radius of the sphere
+    Vec3 m_center;        ///< Center of the sphere.
+    float m_radius{};     ///< Radius of the sphere.
 
     Sphere() : Mesh() {}
     Sphere(const Vec3 &c, const float r) : Mesh(), m_center(c), m_radius(r) {}
 
+    /**
+     * Builds the arrays for the sphere mesh.
+     */
     void buildArrays() override {
         constexpr unsigned int nTheta = 20, nPhi = 20; // Number of subdivisions
         positions_array.resize(3 * nTheta * nPhi);
@@ -70,16 +85,29 @@ public:
         computeAABB();
     }
 
+    /**
+     * Computes the Axis-Aligned Bounding Box (AABB) for the sphere.
+     */
     void computeAABB() override {
         const Vec3 min = m_center - Vec3(m_radius, m_radius, m_radius);
         const Vec3 max = m_center + Vec3(m_radius, m_radius, m_radius);
         aabb = AABB(min, max);
     }
 
+    /**
+     * Checks if the ray intersects with the AABB of the sphere.
+     * @param ray The ray to check for intersection.
+     * @return True if the ray intersects with the AABB, false otherwise.
+     */
     [[nodiscard]] bool intersectAABB(const Ray &ray) const override {
         return ray.intersectAABB(aabb);
     }
 
+    /**
+     * Computes the intersection of the ray with the sphere.
+     * @param ray The ray to test for intersection.
+     * @return A RaySphereIntersection object containing the intersection details.
+     */
     [[nodiscard]] RayIntersection intersect(const Ray &ray) const override {
         RaySphereIntersection intersection;
         const Vec3 oc = ray.origin() - m_center; // Vector from sphere center to ray origin
@@ -126,7 +154,11 @@ public:
     }
 
 private:
-    // Converts spherical coordinates (theta, phi, radius) to Euclidean coordinates
+    /**
+     * Converts spherical coordinates (theta, phi, radius) to Euclidean coordinates.
+     * @param thetaPhiR Spherical coordinates.
+     * @return Euclidean coordinates.
+     */
     [[maybe_unused]] static Vec3 SphericalCoordinatesToEuclidean(const Vec3 &thetaPhiR) {
         return thetaPhiR[2] * Vec3(
             std::cos(thetaPhiR[0]) * std::cos(thetaPhiR[1]),
@@ -135,12 +167,21 @@ private:
         );
     }
 
-    // Converts spherical coordinates (theta, phi) to Euclidean coordinates
-    [[maybe_unused]] static Vec3 SphericalCoordinatesToEuclidean(float theta, float phi) {
+    /**
+     * Converts spherical coordinates (theta, phi) to Euclidean coordinates.
+     * @param theta Theta angle.
+     * @param phi Phi angle.
+     * @return Euclidean coordinates.
+     */
+    [[maybe_unused]] static Vec3 SphericalCoordinatesToEuclidean(const float theta, const float phi) {
         return {std::cos(theta) * std::cos(phi), std::sin(theta) * std::cos(phi), std::sin(phi)};
     }
 
-    // Converts Euclidean coordinates to spherical coordinates
+    /**
+     * Converts Euclidean coordinates to spherical coordinates.
+     * @param xyz Euclidean coordinates.
+     * @return Spherical coordinates.
+     */
     [[maybe_unused]] static Vec3 EuclideanCoordinatesToSpherical(const Vec3 &xyz) {
         const float R = xyz.length();
         const float phi = std::asin(xyz[2] / R);

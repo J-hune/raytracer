@@ -45,6 +45,8 @@ public:
         }
 
         if (settings.useKDTree && settings.drawDebugAABBs) {
+            for (const auto &sphere: spheres) sphere.aabb.draw();
+            for (const auto &square: squares) square.aabb.draw();
             kdTree.draw();
         }
     }

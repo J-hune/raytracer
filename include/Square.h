@@ -6,22 +6,45 @@
 #include <vector>
 #include <cmath>
 
-// Structure to hold the results of a ray-square intersection
+// -------------------------------------------
+// RaySquareIntersection Structure
+// -------------------------------------------
+
+/**
+ * Structure to hold the results of a ray-square intersection.
+ */
 struct RaySquareIntersection : RayIntersection {
     float u{}, v{};
 };
 
-// Class representing a square in 3D space
-class Square : public Mesh {
-public:
-    Vec3 m_normal; // Normal vector of the square
-    Vec3 m_bottom_left; // Bottom-left corner of the square
-    Vec3 m_right_vector; // Right vector of the square
-    Vec3 m_up_vector; // Up vector of the square
+// -------------------------------------------
+// Square Class
+// -------------------------------------------
 
-    // Default constructor
+/**
+ * Class representing a square in 3D space.
+ */
+class Square final : public Mesh {
+public:
+    Vec3 m_normal;          ///< Normal vector of the square.
+    Vec3 m_bottom_left;     ///< Bottom-left corner of the square.
+    Vec3 m_right_vector;    ///< Right vector of the square.
+    Vec3 m_up_vector;       ///< Up vector of the square.
+
     Square() : Mesh() {}
 
+    /**
+     * Constructor for Square with given parameters.
+     * @param bottomLeft Bottom-left corner of the square.
+     * @param rightVector Right vector of the square.
+     * @param upVector Up vector of the square.
+     * @param width Width of the square.
+     * @param height Height of the square.
+     * @param uMin Minimum U texture coordinate.
+     * @param uMax Maximum U texture coordinate.
+     * @param vMin Minimum V texture coordinate.
+     * @param vMax Maximum V texture coordinate.
+     */
     Square(const Vec3 &bottomLeft, const Vec3 &rightVector, const Vec3 &upVector,
            const float width = 1.0f, const float height = 1.0f,
            const float uMin = 0.0f, const float uMax = 1.0f,
@@ -30,7 +53,18 @@ public:
         computeAABB();
     }
 
-    // Set up the square with given parameters
+    /**
+     * Sets up the square with given parameters.
+     * @param bottomLeft Bottom-left corner of the square.
+     * @param rightVector Right vector of the square.
+     * @param upVector Up vector of the square.
+     * @param width Width of the square.
+     * @param height Height of the square.
+     * @param uMin Minimum U texture coordinate.
+     * @param uMax Maximum U texture coordinate.
+     * @param vMin Minimum V texture coordinate.
+     * @param vMax Maximum V texture coordinate.
+     */
     void setQuad(const Vec3 &bottomLeft, const Vec3 &rightVector, const Vec3 &upVector,
                  float width = 1.0f, float height = 1.0f,
                  float uMin = 0.0f, float uMax = 1.0f,
@@ -45,17 +79,29 @@ public:
         computeAABB();
     }
 
+    /**
+     * Computes the Axis-Aligned Bounding Box (AABB) for the square.
+     */
     void computeAABB() override {
         const Vec3 min = m_bottom_left;
         const Vec3 max = m_bottom_left + m_right_vector + m_up_vector;
         aabb = AABB(min, max);
     }
 
+    /**
+     * Checks if the ray intersects with the AABB of the square.
+     * @param ray The ray to check for intersection.
+     * @return True if the ray intersects with the AABB, false otherwise.
+     */
     [[nodiscard]] bool intersectAABB(const Ray &ray) const override {
         return ray.intersectAABB(aabb);
     }
 
-    // Check for intersection between the ray and the square
+    /**
+     * Checks for intersection between the ray and the square.
+     * @param ray The ray to test for intersection.
+     * @return A RayIntersection object containing the intersection details.
+     */
     [[nodiscard]] RayIntersection intersect(const Ray &ray) const override {
         RaySquareIntersection intersection;
         intersection.intersectionExists = false;
@@ -98,7 +144,13 @@ public:
     }
 
 private:
-    // Initialize vertices of the square
+    /**
+     * Initializes the vertices of the square.
+     * @param uMin Minimum U texture coordinate.
+     * @param uMax Maximum U texture coordinate.
+     * @param vMin Minimum V texture coordinate.
+     * @param vMax Maximum V texture coordinate.
+     */
     void initializeVertices(float uMin, float uMax, float vMin, float vMax) {
         vertices.clear();
         vertices.resize(4);
@@ -108,7 +160,9 @@ private:
         vertices[3] = MeshVertex(m_bottom_left + m_up_vector, m_normal, uMin, vMax);
     }
 
-    // Initialize triangles for rendering
+    /**
+     * Initializes the triangles for rendering.
+     */
     void initializeTriangles() {
         triangles.clear();
         triangles.resize(2);
