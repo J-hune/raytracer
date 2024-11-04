@@ -256,19 +256,6 @@ void PhotonMap::debugDrawPhotons() const {
     glDisable(GL_LIGHTING);
     glEnable(GL_COLOR_MATERIAL);
 
-    for (Photon photon : initialPhotons) {
-        glColor3f(0.5f, 0.5f, 0.5f);
-        glBegin(GL_LINES);
-        glVertex3f(photon.position[0], photon.position[1], photon.position[2]);
-
-        glVertex3f(
-            photon.direction[0],
-            photon.direction[1],
-            photon.direction[2]
-        );
-        glEnd();
-    }
-
     // Debug: Draw the photons
     std::vector<Photon> photons = mirrorPhotonTree.toVector();
     for (const auto &[position, direction, color, materialType] : photons) {
@@ -283,6 +270,27 @@ void PhotonMap::debugDrawPhotons() const {
         glColor3f(0.0f, 0.3f, 1.0f);
         glBegin(GL_POINTS);
         glVertex3f(position[0], position[1], position[2]);
+        glEnd();
+    }
+
+    glDisable(GL_COLOR_MATERIAL);
+    glEnable(GL_LIGHTING);
+}
+
+void PhotonMap::debugDrawLightPaths() const {
+    glDisable(GL_LIGHTING);
+    glEnable(GL_COLOR_MATERIAL);
+
+    for (auto [position, direction, color, materialType] : initialPhotons) {
+        glColor3f(0.5f, 0.5f, 0.5f);
+        glBegin(GL_LINES);
+        glVertex3f(position[0], position[1], position[2]);
+
+        glVertex3f(
+            direction[0],
+            direction[1],
+            direction[2]
+        );
         glEnd();
     }
 

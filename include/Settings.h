@@ -47,7 +47,7 @@ public:
     bool reflections = true;                    ///< Enable or disable reflections for mirror-like surfaces.
     bool refractions = true;                    ///< Enable or disable refractions for glass-like surfaces.
     bool caustics = true;                       ///< Enable or disable caustics effects using photon mapping.
-    mutable bool drawDebugPhotons = false;      ///< If true, draw the photons emitted by light sources and their hit points for debugging.
+    mutable short drawDebugPhotons = 0;         ///< 0: Do not draw photons, 1: Draw photons, 2: Draw photons and light paths.
     mutable bool drawDebugAABBs = false;        ///< If true, draw the Axis-Aligned Bounding Boxes (AABBs) of the meshes for debugging.
     bool useKDTree = true;                      ///< Use KD tree for mesh intersection to improve performance, otherwise use a vector (slower).
     int maxKdTreeDepth = 20;                    ///< Maximum depth of the KD tree for mesh intersection.

@@ -51,6 +51,11 @@ public:
      */
     void debugDrawPhotons() const;
 
+    /**
+     * Draws the light paths for debugging purposes.
+     */
+    void debugDrawLightPaths() const;
+
 private:
     std::vector<Photon> initialPhotons; ///< Vector of initial photons.
 
