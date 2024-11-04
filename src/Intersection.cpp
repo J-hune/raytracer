@@ -11,39 +11,33 @@ const std::vector<Square> &squares, const std::vector<Mesh> &meshes, const MeshK
     result.t = FLT_MAX;
 
     // For each object in the scene, compute the intersection with the ray
-    for (unsigned int i = 0; i < spheres.size(); i++) {
+    for (const auto &sphere : spheres) {
         // We first check if the ray intersects an AABB around the sphere
-        if (!spheres[i].intersectAABB(ray)) {
+        if (!sphere.intersectAABB(ray)) {
             continue;
         }
 
-        const RayIntersection intersection = spheres[i].intersect(ray);
+        const RayIntersection intersection = sphere.intersect(ray);
 
         // If the intersection exists and is closer than the previous one, keep it
         if (intersection.intersectionExists && intersection.t <= result.t) {
-            result.intersectionExists = true;
-            result.raySphereIntersection = static_cast<RaySphereIntersection>(intersection);
-            result.t = intersection.t;
-            result.objectIndex = i;
-            result.typeOfIntersectedObject = 0;
+            result = RaySceneIntersection(intersection);
+            result.material = sphere.material;
         }
     }
 
-    for (unsigned int i = 0; i < squares.size(); i++) {
+    for (const auto &square : squares) {
         // We first check if the ray intersects an AABB around the square
-        if (!squares[i].intersectAABB(ray)) {
+        if (!square.intersectAABB(ray)) {
             continue;
         }
 
-        const RayIntersection intersection = squares[i].intersect(ray);
+        const RayIntersection intersection = square.intersect(ray);
 
         // If the intersection exists and is closer than the previous one, keep it
         if (intersection.intersectionExists && intersection.t <= result.t && intersection.t > z_near) {
-            result.intersectionExists = true;
-            result.raySquareIntersection = static_cast<RaySquareIntersection>(intersection);
-            result.t = intersection.t;
-            result.objectIndex = i;
-            result.typeOfIntersectedObject = 1;
+            result = RaySceneIntersection(intersection);
+            result.material = square.material;
         }
     }
 
@@ -53,11 +47,8 @@ const std::vector<Square> &squares, const std::vector<Mesh> &meshes, const MeshK
         if (!kd_tree.isEmpty() && kd_tree.intersect(ray, intersection)) {
             // If the intersection exists and is closer than the previous one, keep it
             if (intersection.intersectionExists && intersection.t <= result.t && intersection.t > z_near) {
-                result.intersectionExists = true;
-                result.rayMeshIntersection = intersection;
-                result.t = intersection.t;
-                result.objectIndex = intersection.tIndex;
-                result.typeOfIntersectedObject = 2;
+                result = RaySceneIntersection(intersection);
+                result.material = meshes[intersection.tIndex].material;
             }
         }
     }
@@ -65,50 +56,21 @@ const std::vector<Square> &squares, const std::vector<Mesh> &meshes, const MeshK
     // I'm keeping the old mesh intersection implementation (without KD-Tree) for rendering time comparisons.
     // And also because I'm a little sentimental about it. :')
     else {
-        for (unsigned int i = 0; i < meshes.size(); i++) {
+        for (const auto &mesh : meshes) {
             // We first check if the ray intersects an AABB around the mesh
-            if (!meshes[i].intersectAABB(ray)) {
+            if (!mesh.intersectAABB(ray)) {
                 continue;
             }
 
-            const RayIntersection intersection = meshes[i].intersect(ray);
+            const RayIntersection intersection = mesh.intersect(ray);
 
             // If the intersection exists and is closer than the previous one, keep it
             if (intersection.intersectionExists && intersection.t <= result.t && intersection.t > z_near) {
-                result.intersectionExists = true;
-                result.rayMeshIntersection = static_cast<RayTriangleIntersection>(intersection);
-                result.t = intersection.t;
-                result.objectIndex = i;
-                result.typeOfIntersectedObject = 2;
+                result = RaySceneIntersection(intersection);
+                result.material = mesh.material;
             }
         }
     }
 
     return result;
-}
-
-std::tuple<Vec3, Vec3, Material> Intersection::parseIntersection(const RaySceneIntersection &intersection,
-    const std::vector<Sphere> &spheres, const std::vector<Square> &squares, const std::vector<Mesh> &meshes) {
-    Vec3 intersectionPoint, normal;
-    Material material;
-
-    // Determine the intersected object (sphere, square, mesh)
-    if (intersection.typeOfIntersectedObject == 0) {
-        // Sphere
-        intersectionPoint = intersection.raySphereIntersection.intersection;
-        normal = intersection.raySphereIntersection.normal;
-        material = spheres[intersection.objectIndex].material;
-    } else if (intersection.typeOfIntersectedObject == 1) {
-        // Square
-        intersectionPoint = intersection.raySquareIntersection.intersection;
-        normal = intersection.raySquareIntersection.normal;
-        material = squares[intersection.objectIndex].material;
-    } else {
-        // Mesh
-        intersectionPoint = intersection.rayMeshIntersection.intersection;
-        normal = intersection.rayMeshIntersection.normal;
-        material = meshes[intersection.objectIndex].material;
-    }
-
-    return {intersectionPoint, normal, material};
 }

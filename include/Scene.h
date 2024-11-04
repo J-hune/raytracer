@@ -1,7 +1,6 @@
 #ifndef SCENE_H
 #define SCENE_H
 
-#include <map>
 #include <vector>
 #include <string>
 
@@ -78,17 +77,15 @@ public:
             return color; // Background color
         }
 
-        auto [intersectionPoint, normal, material] = Intersection::parseIntersection(intersection, spheres, squares, meshes);
-
         // Add direct illumination
-        if (settings.directIllumination && material.type == Material_Diffuse_Blinn_Phong) {
-            const Vec3 directIlluminationColor = computeDirectIllumination(ray, intersectionPoint, normal, material, settings, rng);
+        if (settings.directIllumination && intersection.material.type == Material_Diffuse_Blinn_Phong) {
+            const Vec3 directIlluminationColor = computeDirectIllumination(ray, intersection.intersection, intersection.normal, intersection.material, settings, rng);
             color += directIlluminationReinhardKey > 0 ? reinhardToneMapping(directIlluminationColor, directIlluminationReinhardKey) : directIlluminationColor;
         }
 
         // Add caustics effect
         if (settings.caustics) {
-            const Vec3 causticsColor = photonMap.computeCaustics(intersectionPoint, material);
+            const Vec3 causticsColor = photonMap.computeCaustics(intersection.intersection, intersection.material);
 
             // Tone mapping
             color += reinhardToneMapping(causticsColor, causticsReinhardKey);
@@ -96,13 +93,19 @@ public:
 
         // Add reflection
         if (NRemainingBounces > 0 && settings.reflections) {
-            const Vec3 reflectionColor = computeReflection(ray, intersectionPoint, normal, material, NRemainingBounces, settings, rng);
+            const Vec3 reflectionColor = computeReflection(
+                ray, intersection.intersection, intersection.normal,
+                intersection.material, NRemainingBounces, settings, rng
+            );
             color += reflectionColor;
         }
 
         // Add refraction
         if (NRemainingBounces > 0 && settings.refractions) {
-            color += computeRefraction(ray, intersectionPoint, normal, material, NRemainingBounces, settings, rng);
+            color += computeRefraction(
+                ray, intersection.intersection, intersection.normal, intersection.material,
+                NRemainingBounces, settings, rng
+            );
         }
 
         return color; // Return the accumulated color

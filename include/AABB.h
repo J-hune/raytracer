@@ -63,12 +63,12 @@ public:
      * This method disables lighting and enables color material to draw the AABB as a wireframe.
      * It uses a line strip to draw the edges of the AABB.
      */
-    void draw() const {
+    void draw(Vec3 color = Vec3(0.8f, 0.8f, 0.2f)) const {
         glDisable(GL_LIGHTING);
         glEnable(GL_COLOR_MATERIAL);
         glLineWidth(1.0f);
         glBegin(GL_LINE_STRIP);
-        glColor3f(0.8f, 0.8f, 0.2f);
+        glColor3f(color[0], color[1], color[2]);
 
         // Bottom face
         glVertex3f(min[0], min[1], min[2]);
