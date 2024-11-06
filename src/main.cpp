@@ -75,7 +75,7 @@ void printUsage() {
         << "  q   : Quick Render" << endl
         << "  r   : Render" << endl
         << "  +   : Switch Scene" << endl
-        << "  p   : Draw Debug Photons" << endl
+        << "  p   : Draw Debug Photons (8 modes you can cycle through)" << endl
         << "  a   : Draw Debug Axis-Aligned Bounding Boxes (AABBs)" << endl
         << endl
         << "Mouse Controls:" << endl
@@ -331,7 +331,8 @@ void ray_trace_from_camera(const Settings &settings) {
     f << "# Render duration: " << static_cast<float>(duration.count()) / 1000.f << " seconds\n";
     f << "# Samples per pixel: " << settings.samples << "\n";
     f << "# Shadow rays: " << settings.shadowRays << "\n";
-    f << "# Photons: " << settings.photons << "\n";
+    f << "# Global photons: " << settings.globalPhotons << "\n";
+    f << "# Caustics photons: " << settings.causticsPhotons << "\n";
     for (const auto &pixel: image) {
         f << static_cast<int>(255.f * std::min(1.f, pixel[0])) << " "
           << static_cast<int>(255.f * std::min(1.f, pixel[1])) << " "
@@ -383,7 +384,7 @@ void keyboard(const unsigned char key, int _x, int _y) {
             settings.drawDebugAABBs = !settings.drawDebugAABBs;
             break;
         case 'p':
-            settings.drawDebugPhotons = (settings.drawDebugPhotons + 1) % 3;
+            settings.drawDebugPhotons = (settings.drawDebugPhotons + 1) % 7;
             break;
         case 27:
             exit(0);
@@ -476,12 +477,13 @@ int main(int argc, char **argv) {
     settings.height = 480;
     settings.samples = 80;
     settings.shadowRays = 16;
-    settings.photons = 500000;
+    settings.globalPhotons = 500000;
+    settings.causticsPhotons = 100000;
     settings.directIllumination = true;
     settings.caustics = true;
     settings.reflections = true;
     settings.refractions = true;
-    settings.drawDebugPhotons = 1; // 0: Do not draw photons, 1: Draw photons, 2: Draw photons and light paths
+    settings.drawDebugPhotons = 1; // 0: Do not draw photons, 1: Draw caustics, 2: Draw global + caustics, 3: Draw light paths + global + caustics
     settings.drawDebugAABBs = false;
     settings.useKDTree = true;
     settings.maxKdTreeDepth = 12;
