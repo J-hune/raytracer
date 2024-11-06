@@ -476,7 +476,7 @@ int main(int argc, char **argv) {
     settings.height = 480;
     settings.samples = 80;
     settings.shadowRays = 16;
-    settings.photons = 200000;
+    settings.photons = 500000;
     settings.directIllumination = true;
     settings.caustics = true;
     settings.reflections = true;
@@ -485,7 +485,7 @@ int main(int argc, char **argv) {
     settings.drawDebugAABBs = false;
     settings.useKDTree = true;
     settings.maxKdTreeDepth = 12;
-    settings.floorType = CHECKERBOARD; //PLAIN, CHECKERBOARD (checkerboard is a lot slower)
+    settings.floorType = PLAIN; //PLAIN, CHECKERBOARD (checkerboard is a lot slower)
 
     if (argc > 2) {
         printUsage();
@@ -507,13 +507,14 @@ int main(int argc, char **argv) {
 
 
     camera.move(0., 0., -3.1);
-    selected_scene = 3;
-    scenes.resize(5);
+    selected_scene = 5;
+    scenes.resize(6);
     scenes[0].setup_single_sphere();
     scenes[1].setup_multiple_spheres();
     scenes[2].setup_single_square();
     scenes[3].setup_cornell_box_with_2_spheres();
     scenes[4].setup_cornell_box_mesh();
+    scenes[5].setup_cornell_box_with_3_spheres();
     glutMainLoop();
 
     return EXIT_SUCCESS;

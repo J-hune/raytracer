@@ -15,7 +15,7 @@ struct Photon {
     Vec3 position;              ///< Position of the photon.
     Vec3 direction;             ///< Direction of the photon.
     Vec3 color;                 ///< Color of the photon.
-    MaterialType materialType;  ///< Material type of the photon.
+    Vec3 debugColor;            ///< Debug color of the photon.
 
     /**
      * Gets the position of the photon.

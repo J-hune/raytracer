@@ -106,13 +106,9 @@ public:
         RaySquareIntersection intersection;
         intersection.intersectionExists = false;
 
-        const Vec3 &bottomLeft = vertices[0].position;
-        const Vec3 rightVector = vertices[1].position - bottomLeft;
-        const Vec3 upVector = vertices[3].position - bottomLeft;
-
-        const Vec3 normal = Vec3::cross(rightVector, upVector).normalized();
+        const Vec3 normal = Vec3::cross(m_right_vector, m_up_vector).normalized();
         const float denominator = Vec3::dot(normal, ray.direction());
-        const float numerator = Vec3::dot(bottomLeft - ray.origin(), normal);
+        const float numerator = Vec3::dot(m_bottom_left - ray.origin(), normal);
 
         // Check for parallelism
         if (std::fabs(denominator) < 1e-6) {
@@ -125,10 +121,10 @@ public:
         }
 
         const Vec3 PointIntersection = ray.origin() + t * ray.direction();
-        const Vec3 localP = PointIntersection - bottomLeft;
+        const Vec3 localP = PointIntersection - m_bottom_left;
 
-        const float u = Vec3::dot(localP, rightVector) / rightVector.squareLength();
-        const float v = Vec3::dot(localP, upVector) / upVector.squareLength();
+        const float u = Vec3::dot(localP, m_right_vector) / m_right_vector.squareLength();
+        const float v = Vec3::dot(localP, m_up_vector) / m_up_vector.squareLength();
 
         // Check bounds of the square
         if (u >= 0 && u <= 1 && v >= 0 && v <= 1) {

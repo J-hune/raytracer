@@ -62,14 +62,6 @@ public:
     Vec3 rayTraceRecursive(const Ray &ray, const int NRemainingBounces, const Settings &settings, std::mt19937 &rng, const float z_near = 0.0f) {
         Vec3 color(0.0f, 0.0f, 0.0f);
 
-        auto reinhardToneMapping = [](const Vec3 &pixelColor, const float keyValue) -> Vec3 {
-            Vec3 mappedColor;
-            for (int i = 0; i < 3; ++i) {
-                mappedColor[i] = (pixelColor[i] * keyValue) / (pixelColor[i] * keyValue + 1.0f);
-            }
-            return mappedColor;
-        };
-
         // Compute the intersection with the scene (ray vs. (spheres, squares, meshes))
         const RaySceneIntersection intersection = Intersection::computeIntersection(ray, spheres, squares, meshes, kdTree, z_near);
 
@@ -78,18 +70,10 @@ public:
             return color; // Background color
         }
 
-        // Add direct illumination
-        if (settings.directIllumination && intersection.material.type == Material_Diffuse_Blinn_Phong) {
-            const Vec3 directIlluminationColor = computeDirectIllumination(ray, intersection.intersection, intersection.normal, intersection.material, settings, rng);
-            color += directIlluminationReinhardKey > 0 ? reinhardToneMapping(directIlluminationColor, directIlluminationReinhardKey) : directIlluminationColor;
-        }
-
         // Add caustics effect
         if (settings.caustics) {
             const Vec3 causticsColor = photonMap.computeCaustics(intersection.intersection, intersection.material);
-
-            // Tone mapping
-            color += reinhardToneMapping(causticsColor, causticsReinhardKey);
+            color += causticsColor;
         }
 
         // Add reflection
@@ -110,29 +94,6 @@ public:
         }
 
         return color; // Return the accumulated color
-    }
-
-    Vec3 computeDirectIllumination(const Ray &ray, const Vec3 &intersectionPoint, const Vec3 &normal, const Material &material, const Settings &settings, std::mt19937 &rng) {
-        Vec3 color(0.0f, 0.0f, 0.0f);
-        const Vec3 ambientLight(0.1f, 0.1f, 0.1f); // Ambient light
-
-        // Add the ambient light to the color
-        color += Vec3::compProduct(material.ambient_material, ambientLight);
-
-        // Pre-normalize the view vector
-        Vec3 viewDir = -ray.direction();
-        viewDir.normalize();
-
-        // For each light in the scene
-        for (const auto &light: lights) {
-            if (light.type == LightType_Spherical) {
-                color += computeSphericalLight(intersectionPoint, normal, material, light, viewDir, settings);
-            } else if (light.type == LightType_Quad) {
-                color += computeQuadLight(intersectionPoint, normal, material, light, viewDir, settings, rng);
-            }
-        }
-
-        return color;
     }
 
     [[nodiscard]] Vec3 computeSphericalLight(const Vec3 &intersectionPoint, const Vec3 &normal, const Material &material, const Light &light, const Vec3 &viewDir, const Settings &settings) const {
@@ -257,6 +218,13 @@ public:
         addSphere(Vec3(-1.0, -1.25, -0.5), 0.75f, Material_Mirror, Vec3(0.f), Vec3(1.f), 16, 0.f, 0.f);
     }
 
+    void setup_cornell_box_with_3_spheres() {
+        setup_cornell_box();
+        addSphere(Vec3(0.5, -1.49, 0.8), 0.5f, Material_Glass, Vec3(0.f), Vec3(1.f), 16, 1.0, 1.5);
+        addSphere(Vec3(-1.0, -1.24, -0.5), 0.75f, Material_Mirror, Vec3(0.f), Vec3(1.f), 16, 0.f, 0.f);
+        addSphere(Vec3(0.8, -0.99, -1), 1.f, Material_Diffuse_Blinn_Phong, Vec3(0.654, 0.776, 0.509), Vec3(0.439, 0.776, 0.254), 20);
+    }
+
     void setup_cornell_box_mesh() {
         const Settings &settings = Settings::getInstance();
         directIlluminationReinhardKey = 0.9f;
@@ -344,7 +312,7 @@ public:
             s.setQuad(Vec3(-2., -2., -2.), Vec3(2., 0., 0.), Vec3(0., 2., 0.), 4., 4.);
             s.buildArrays();
             s.material.diffuse_material = Vec3(1., 1., 1.);
-            s.material.specular_material = Vec3(0.05, 0.05, 0.05);
+            s.material.specular_material = Vec3(1., 1., 1.) * 0.2f;
             s.material.shininess = 5;
         } {
             // Left Wall
@@ -413,7 +381,7 @@ public:
             s.setQuad(Vec3(-2., 2., 2.), Vec3(2., 0., 0.), Vec3(0., -2., 0.), 4., 4.);
             s.buildArrays();
             s.material.diffuse_material = Vec3(1.0, 1.0, 1.0);
-            s.material.specular_material = Vec3(0.05, 0.05, 0.05);
+            s.material.specular_material = Vec3(1.0, 1.0, 1.0) * 0.2f;
             s.material.shininess = 5;
         }
     }
