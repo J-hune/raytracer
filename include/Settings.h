@@ -42,7 +42,8 @@ public:
     mutable int height = 480;                   ///< Height of the window in pixels.
     mutable int samples = 100;                  ///< Number of samples per pixel for antialiasing to reduce noise.
     mutable int shadowRays = 16;                ///< Number of rays used to calculate shadows for soft shadow effects.
-    int photons = 20000;                        ///< Number of photons to emit for photon mapping.
+    int globalPhotons = 20000;                  ///< Number of photons to emit for global illumination.
+    int causticsPhotons = 20000;                ///< Number of photons to emit for caustics effects.
     bool directIllumination = true;             ///< Enable or disable direct illumination using the Phong model.
     bool reflections = true;                    ///< Enable or disable reflections for mirror-like surfaces.
     bool refractions = true;                    ///< Enable or disable refractions for glass-like surfaces.

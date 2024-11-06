@@ -36,11 +36,10 @@ public:
         for (const auto &sphere: spheres) sphere.draw();
         for (const auto &square: squares) square.draw();
 
-        if (settings.drawDebugPhotons > 0) photonMap.debugDrawPhotons();
-        if (settings.drawDebugPhotons == 2) photonMap.debugDrawLightPaths();
+        if (settings.drawDebugPhotons > 0) photonMap.debugDrawPhotons(settings.drawDebugPhotons);
         if (!photonsEmitted && settings.caustics && drawCaustics) {
             std::cout << "Emitting photons, the application will freeze for a few seconds..." << std::endl;
-            photonMap.emitPhotons(lights, spheres, squares, meshes, kdTree, settings.photons);
+            photonMap.emitPhotons(lights, spheres, squares, meshes, kdTree, settings);
             photonsEmitted = true;
         }
 
