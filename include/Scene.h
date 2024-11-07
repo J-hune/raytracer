@@ -21,8 +21,6 @@ class Scene {
     std::vector<Light> lights;
     PhotonMap photonMap;
     bool photonsEmitted = false;
-    float directIlluminationReinhardKey = 0.0f;
-    float causticsReinhardKey = 0.0f;
     bool drawCaustics = true;
     MeshKDTree kdTree;
 public:
@@ -36,9 +34,9 @@ public:
         for (const auto &sphere: spheres) sphere.draw();
         for (const auto &square: squares) square.draw();
 
-        if (settings.drawDebugPhotons > 0) photonMap.debugDrawPhotons(settings.drawDebugPhotons);
-        if (!photonsEmitted && settings.caustics && drawCaustics) {
-            std::cout << "Emitting photons, the application will freeze for a few seconds..." << std::endl;
+        photonMap.debugDrawPhotons(settings.drawDebugPhotons);
+        if (!photonsEmitted && (settings.indirectIllumination || settings.caustics) && drawCaustics) {
+            std::cout << "Emitting photons... The application may freeze for a few seconds." << std::endl;
             photonMap.emitPhotons(lights, spheres, squares, meshes, kdTree, settings);
             photonsEmitted = true;
         }
@@ -69,10 +67,18 @@ public:
             return color; // Background color
         }
 
-        // Add caustics effect
-        if (settings.caustics) {
-            const Vec3 causticsColor = photonMap.computeCaustics(intersection.intersection, intersection.material);
-            color += causticsColor;
+        // Add direct illumination
+        if (settings.directIllumination && intersection.material.type == Material_Diffuse_Blinn_Phong) {
+            const Vec3 directIlluminationColor = computeDirectIllumination(
+                ray, intersection.intersection, intersection.normal,
+                intersection.material, settings, rng
+            );
+            color += directIlluminationColor;
+        }
+
+        if ((settings.indirectIllumination || settings.caustics) && intersection.material.type == Material_Diffuse_Blinn_Phong) {
+            const Vec3 indirectIlluminationColor = photonMap.computeIndirectIllumination(intersection, settings);
+            color += indirectIlluminationColor;
         }
 
         // Add reflection
@@ -95,7 +101,30 @@ public:
         return color; // Return the accumulated color
     }
 
-    [[nodiscard]] Vec3 computeSphericalLight(const Vec3 &intersectionPoint, const Vec3 &normal, const Material &material, const Light &light, const Vec3 &viewDir, const Settings &settings) const {
+    Vec3 computeDirectIllumination(const Ray &ray, const Vec3 &intersectionPoint, const Vec3 &normal, const Material &material, const Settings &settings, std::mt19937 &rng) {
+        Vec3 color(0.0f, 0.0f, 0.0f);
+        const Vec3 ambientLight(0.1f, 0.1f, 0.1f); // Ambient light
+
+        // Add the ambient light to the color
+        color += Vec3::compProduct(material.ambient_material, ambientLight);
+
+        // Pre-normalize the view vector
+        Vec3 viewDir = -ray.direction();
+        viewDir.normalize();
+
+        // For each light in the scene
+        for (const auto &light: lights) {
+            if (light.type == LightType_Spherical) {
+                color += computeSphericalLight(intersectionPoint, normal, material, light, viewDir);
+            } else if (light.type == LightType_Quad) {
+                color += computeQuadLight(intersectionPoint, normal, material, light, viewDir, settings, rng);
+            }
+        }
+
+        return color;
+    }
+
+    [[nodiscard]] Vec3 computeSphericalLight(const Vec3 &intersectionPoint, const Vec3 &normal, const Material &material, const Light &light, const Vec3 &viewDir) const {
         constexpr float epsilon = 1e-5f;
         const Vec3 lightDir = (light.position - intersectionPoint).normalize();
         const float lightDistance = lightDir.length();
@@ -186,7 +215,6 @@ public:
     /********************************************* SCENE SETUP FUNCTIONS **********************************************/
     /******************************************************************************************************************/
 
-    // Scene 1
     void setup_single_sphere() {
         drawCaustics = false;
         addLight(Vec3(-5, 5, 5), LightType_Spherical, Vec3(1, 1, 1), 2.5f, 2.f);
@@ -208,10 +236,6 @@ public:
     }
 
     void setup_cornell_box_with_2_spheres() {
-        directIlluminationReinhardKey = 0.9f;
-        causticsReinhardKey = 0.0008f;
-        // 500000 photons => 0.0003f
-
         setup_cornell_box();
         addSphere(Vec3(1.0, -1.25, 0.5), 0.75f, Material_Glass, Vec3(0.f), Vec3(1.f), 16, 1.0, 1.5);
         addSphere(Vec3(-1.0, -1.25, -0.5), 0.75f, Material_Mirror, Vec3(0.f), Vec3(1.f), 16, 0.f, 0.f);
@@ -226,10 +250,6 @@ public:
 
     void setup_cornell_box_mesh() {
         const Settings &settings = Settings::getInstance();
-        directIlluminationReinhardKey = 0.9f;
-        causticsReinhardKey = 0.0002f;
-        // 500000 photons => 0.0001f
-
         setup_cornell_box();
         addMesh("../data/epcot.off", Vec3(0.0, -0.4, 0.0), Vec3(1.f),
             Material_Mirror, Vec3(0.f), Vec3(1.f), 16, 0.0, 1.5);
@@ -293,7 +313,7 @@ public:
     void setup_cornell_box() {
         const Settings &settings = Settings::getInstance();
 
-        const Light light(Vec3(0.0, 1.5, 0.0), LightType_Quad, Vec3(1, 1, 1), 2.5f, 2.f, false);
+        const Light light(Vec3(0.0, 1.5, 0.0), LightType_Quad, Vec3(0.8, 0.8, 0.8), 2.5f, 2.f, false);
         light.quad = Mesh();
         light.quad.vertices.emplace_back(Vec3(-0.5, 1.5, -0.5), Vec3(0, -1, 0));
         light.quad.vertices.emplace_back(Vec3(0.5, 1.5, -0.5), Vec3(0, -1, 0));
@@ -310,8 +330,8 @@ public:
             Square &s = squares[squares.size() - 1];
             s.setQuad(Vec3(-2., -2., -2.), Vec3(2., 0., 0.), Vec3(0., 2., 0.), 4., 4.);
             s.buildArrays();
-            s.material.diffuse_material = Vec3(1., 1., 1.);
-            s.material.specular_material = Vec3(1., 1., 1.) * 0.2f;
+            s.material.diffuse_material = Vec3(0.8, 0.8, 0.8);
+            s.material.specular_material = s.material.diffuse_material * 0.05f;
             s.material.shininess = 5;
         } {
             // Left Wall
@@ -320,7 +340,7 @@ public:
             s.setQuad(Vec3(-2., -2., 2.), Vec3(0., 0., -2.), Vec3(0., 2, 0.), 4., 4.);
             s.buildArrays();
             s.material.diffuse_material = Vec3(194.0f / 255.0f, 49.0f / 255.0f, 44.0f / 255.0f);
-            s.material.specular_material = Vec3(194.0f / 255.0f, 49.0f / 255.0f, 44.0f / 255.0f) * 0.5f;
+            s.material.specular_material = s.material.diffuse_material * 0.1f;
             s.material.shininess = 16;
         } {
             // Right Wall
@@ -329,7 +349,7 @@ public:
             s.setQuad(Vec3(2., -2., -2.), Vec3(0., 0., 2.), Vec3(0., 2., 0.), 4., 4.);
             s.buildArrays();
             s.material.diffuse_material = Vec3(22.0f / 255.0f, 34.0f / 255.0f, 101.0f / 255.0f);
-            s.material.specular_material = Vec3(22.0f / 255.0f, 34.0f / 255.0f, 101.0f / 255.0f) * 0.5f;
+            s.material.specular_material = s.material.diffuse_material * 0.1f;
             s.material.shininess = 16;
         } {
             // Floor
@@ -337,8 +357,8 @@ public:
                 constexpr int numSquares = 8; // Number of squares per row/column
                 constexpr float squareSize = 4.0f / numSquares;
                 squares.resize(squares.size() + numSquares * numSquares);
-                const Vec3 color1(1.0f, 1.0f, 1.0f); // Blanc
-                const Vec3 color2(0.0f, 0.0f, 0.0f); // Noir
+                const Vec3 color1(1.0f, 1.0f, 1.0f); // White
+                const Vec3 color2(0.0f, 0.0f, 0.0f); // Black
 
                 for (int i = 0; i < numSquares; ++i) {
                     for (int j = 0; j < numSquares; ++j) {
@@ -351,8 +371,8 @@ public:
                         );
                         s.buildArrays();
                         s.material.diffuse_material = ((i + j) % 2 == 0) ? color1 : color2;
-                        s.material.specular_material = Vec3(0.2f, 0.2f, 0.2f);
-                        s.material.shininess = 20;
+                        s.material.specular_material = s.material.diffuse_material * 0.8f;
+                        s.material.shininess = 64;
                     }
                 }
             } else if (settings.floorType == PLAIN) {
@@ -361,7 +381,7 @@ public:
                     s.setQuad(Vec3(2., -2., -2.), Vec3(-2., 0., 0.), Vec3(0., 0., 2.), 4., 4.);
                     s.buildArrays();
                     s.material.diffuse_material = Vec3(1.0, 1.0, 1.0);
-                    s.material.specular_material = Vec3(0.5, 0.5, 0.5);
+                    s.material.specular_material = s.material.diffuse_material * 0.05f;
                     s.material.shininess = 16;
             }
         } {
@@ -371,7 +391,7 @@ public:
             s.setQuad(Vec3(-2., 2., -2.), Vec3(2., 0., 0.), Vec3(0., 0., 2.), 4., 4.);
             s.buildArrays();
             s.material.diffuse_material = Vec3(1.0, 1.0, 1.0);
-            s.material.specular_material = Vec3(1.0, 1.0, 1.0) * 0.2f;
+            s.material.specular_material = s.material.diffuse_material * 0.05f;
             s.material.shininess = 16;
         } {
             // Front Wall
@@ -379,8 +399,8 @@ public:
             Square &s = squares[squares.size() - 1];
             s.setQuad(Vec3(-2., 2., 2.), Vec3(2., 0., 0.), Vec3(0., -2., 0.), 4., 4.);
             s.buildArrays();
-            s.material.diffuse_material = Vec3(1.0, 1.0, 1.0);
-            s.material.specular_material = Vec3(1.0, 1.0, 1.0) * 0.2f;
+            s.material.diffuse_material = Vec3(0.8, 0.8, 0.8);
+            s.material.specular_material = s.material.diffuse_material * 0.05f;
             s.material.shininess = 5;
         }
     }

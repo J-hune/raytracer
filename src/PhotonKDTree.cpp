@@ -1,5 +1,8 @@
 #include "../include/PhotonKDTree.h"
 
+#include <cmath>
+#include <queue>
+
 std::vector<Photon> PhotonKDTree::toVector() const {
     std::vector<Photon> elements;
     getElementsRecursive(root.get(), elements);
@@ -41,27 +44,47 @@ PhotonKDNode *PhotonKDTree::buildPhotonBalancedTree(std::vector<Photon> &element
     return node.release();
 }
 
-std::vector<Photon> PhotonKDTree::findNearestNeighbors(const Vec3 &point, const float maxDistance) const {
-    std::vector<std::pair<float, Photon>> nearestElements;
-    findNearestNeighborsRecursive(root.get(), point, maxDistance * maxDistance, 0, nearestElements);
+std::vector<Photon> PhotonKDTree::findNearestNeighbors(const Vec3 &point, const Vec3 &normal, const float maxDistance, const int maxCount) const {
+    // Priority queue to store the nearest photons, with the farthest on top
+    std::priority_queue<std::pair<float, Photon>, std::vector<std::pair<float, Photon>>, PhotonDistanceComparator> nearestElements;
+    findNearestNeighborsRecursive(root.get(), point, normal, maxDistance * maxDistance, 0, maxCount, nearestElements);
 
+    // Extract photons from the priority queue
     std::vector<Photon> result;
-    for (const auto& pair : nearestElements) {
-        result.push_back(pair.second); // Collect only the photon data
+    while (!nearestElements.empty()) {
+        result.push_back(nearestElements.top().second); // Collect only the photon data
+        nearestElements.pop();
     }
+
+    // Warning: the result vector is in reverse order (farthest to nearest)
     return result;
 }
 
-void PhotonKDTree::findNearestNeighborsRecursive(const PhotonKDNode *node, const Vec3 &point, const float maxDistSq, const int depth, std::vector<std::pair<float, Photon> > &nearestElements)
-const {
+void PhotonKDTree::findNearestNeighborsRecursive(
+    const PhotonKDNode *node, const Vec3 &point, const Vec3 &normal, const float maxDistSq, const int depth, const int maxCount,
+    std::priority_queue<std::pair<float, Photon>, std::vector<std::pair<float, Photon>>, PhotonDistanceComparator> &nearestElements) {
+
     if (!node) return;
 
-    // Compute squared distance to the current node's photon
-    float distSq = (node->data.position - point).squareLength();
+    // Calculate the vector from the point to the photon
+    const Vec3 toPhoton = node->data.position - point;
 
-    // If within the maximum distance, add the photon to the nearest elements list
-    if (distSq < maxDistSq) {
-        nearestElements.emplace_back(distSq, node->data);
+    // Calculate the squared distance to the photon center
+    float distSqToCenter = toPhoton.squareLength();
+
+    // Calculate the distance to the plane defined by the normal
+    const float distToPlane = Vec3::dot(toPhoton, normal);
+
+    // Check if the photon is within the disk region (both distance to center and distance to the plane)
+    if (distSqToCenter < maxDistSq && std::fabs(distToPlane) < 1e-5f) {
+        // Add photon to the results if it's within the allowed distance
+        if (static_cast<int>(nearestElements.size()) < maxCount) {
+            nearestElements.emplace(distSqToCenter, node->data);
+        } else if (!nearestElements.empty() && distSqToCenter < nearestElements.top().first) {
+            // Replace the farthest photon if this one is closer
+            nearestElements.pop();
+            nearestElements.emplace(distSqToCenter, node->data);
+        }
     }
 
     // Determine the current splitting axis and the difference along this axis
@@ -73,10 +96,10 @@ const {
     const PhotonKDNode* farNode = diff < 0 ? node->right.get() : node->left.get();
 
     // Search in the nearer subtree
-    findNearestNeighborsRecursive(nearNode, point, maxDistSq, depth + 1, nearestElements);
+    findNearestNeighborsRecursive(nearNode, point, normal, maxDistSq, depth + 1, maxCount, nearestElements);
 
     // If the squared distance along the axis is within maxDistSq, search the farther subtree
-    if (diff * diff < maxDistSq) {
-        findNearestNeighborsRecursive(farNode, point, maxDistSq, depth + 1, nearestElements);
+    if (diff * diff < maxDistSq && (static_cast<int>(nearestElements.size()) < maxCount || diff * diff < nearestElements.top().first)) {
+        findNearestNeighborsRecursive(farNode, point, normal, maxDistSq, depth + 1, maxCount, nearestElements);
     }
 }

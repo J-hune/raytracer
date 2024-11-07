@@ -333,6 +333,10 @@ void ray_trace_from_camera(const Settings &settings) {
     f << "# Shadow rays: " << settings.shadowRays << "\n";
     f << "# Global photons: " << settings.globalPhotons << "\n";
     f << "# Caustics photons: " << settings.causticsPhotons << "\n";
+    f << "# Max indirect distance: " << settings.maxIndirectDistance << "\n";
+    f << "# Max caustics distance: " << settings.maxCausticsDistance << "\n";
+    f << "# Photon count for indirect color estimation: " << settings.photonCountForIndirectColorEstimation << "\n";
+    f << "# Photon count for caustics color estimation: " << settings.photonCountForCausticsColorEstimation << "\n";
     for (const auto &pixel: image) {
         f << static_cast<int>(255.f * std::min(1.f, pixel[0])) << " "
           << static_cast<int>(255.f * std::min(1.f, pixel[1])) << " "
@@ -355,7 +359,7 @@ void fast_ray_trace_from_camera(const Settings &settings) {
     settings.width = 240;
     settings.height = 240;
     settings.samples = 8;
-    settings.shadowRays = 6;
+    settings.shadowRays = 8;
     camera.resize(settings.width, settings.height);
     ray_trace_from_camera(settings);
 
@@ -476,14 +480,19 @@ int main(int argc, char **argv) {
     settings.width = 480;
     settings.height = 480;
     settings.samples = 80;
-    settings.shadowRays = 16;
-    settings.globalPhotons = 500000;
-    settings.causticsPhotons = 100000;
+    settings.shadowRays = 32;
+    settings.globalPhotons = 100000;
+    settings.causticsPhotons = 500000;
+    settings.maxIndirectDistance = 0.8f;
+    settings.maxCausticsDistance = 0.1f;
+    settings.photonCountForIndirectColorEstimation = 2000;
+    settings.photonCountForCausticsColorEstimation = 1500;
     settings.directIllumination = true;
+    settings.indirectIllumination = true;
     settings.caustics = true;
     settings.reflections = true;
     settings.refractions = true;
-    settings.drawDebugPhotons = 1; // 0: Do not draw photons, 1: Draw caustics, 2: Draw global + caustics, 3: Draw light paths + global + caustics
+    settings.drawDebugPhotons = 1;
     settings.drawDebugAABBs = false;
     settings.useKDTree = true;
     settings.maxKdTreeDepth = 12;
@@ -496,7 +505,7 @@ int main(int argc, char **argv) {
     glutInit(&argc, argv);
     glutInitDisplayMode(GLUT_RGBA | GLUT_DEPTH | GLUT_DOUBLE);
     glutInitWindowSize(settings.width, settings.height);
-    window = glutCreateWindow("gMini");
+    window = glutCreateWindow("Raytracer");
 
     init();
     glutIdleFunc(idle);
@@ -509,7 +518,7 @@ int main(int argc, char **argv) {
 
 
     camera.move(0., 0., -3.1);
-    selected_scene = 5;
+    selected_scene = 4;
     scenes.resize(6);
     scenes[0].setup_single_sphere();
     scenes[1].setup_multiple_spheres();
