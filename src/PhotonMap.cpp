@@ -13,9 +13,6 @@ void PhotonMap::emitPhotons(
     const std::vector<Light>& lights, const std::vector<Sphere>& spheres, const std::vector<Square>& squares,
     const std::vector<Mesh>& meshes, const MeshKDTree& kdTree, const Settings& settings)
 {
-    if (settings.globalPhotons <= 0) {
-        throw std::invalid_argument("Number of photons must be greater than zero.");
-    }
     if (lights.empty()) {
         throw std::invalid_argument("No lights in the scene.");
     }
@@ -317,54 +314,58 @@ void PhotonMap::debugDrawPhotons(const int type) {
     if (globalPhotons.empty()) globalPhotons = globalPhotonTree.toVector();
     if (causticsPhotons.empty()) causticsPhotons = causticsPhotonTree.toVector();
 
+    /* --------------------------------- Draw Photons --------------------------------- */
+    glBegin(GL_POINTS);
+
+    // Dessiner tous les photons globaux si le type est approprié
     if (type > 2) {
         for (const Photon &photon: globalPhotons) {
             glColor3f(photon.debugColor[0], photon.debugColor[1], photon.debugColor[2]);
-            glBegin(GL_POINTS);
             glVertex3f(photon.position[0], photon.position[1], photon.position[2]);
-            glEnd();
         }
     }
 
+    // Dessiner tous les photons caustiques si le type est approprié
     if (type < 3 || type > 4) {
         for (const Photon &photon: causticsPhotons) {
             glColor3f(photon.debugColor[0], photon.debugColor[1], photon.debugColor[2]);
-            glBegin(GL_POINTS);
             glVertex3f(photon.position[0], photon.position[1], photon.position[2]);
-            glEnd();
         }
     }
+    glEnd();
 
-    if (type == 4 || type == 6) {
+    /* --------------------------------- Draw Photon Paths --------------------------------- */
+    if ((type == 4 || type == 6) && !initialGlobalPhotons.empty()) {
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-        for (const Photon &photon : initialGlobalPhotons) {
-            glColor4f(initialGlobalPhotons[0].color[0], initialGlobalPhotons[0].color[1], initialGlobalPhotons[0].color[2], 0.2f);
-            glBegin(GL_LINES);
+        glColor4f(initialGlobalPhotons[0].color[0], initialGlobalPhotons[0].color[1], initialGlobalPhotons[0].color[2], 0.2f);
+        glBegin(GL_LINES);
+        for (int i = 0; i < std::min(10000, static_cast<int>(initialGlobalPhotons.size())); i++) {
+            const Photon &photon = initialGlobalPhotons[i];
             glVertex3f(photon.position[0], photon.position[1], photon.position[2]);
             glVertex3f(photon.direction[0] + photon.position[0], photon.direction[1] + photon.position[1], photon.direction[2] + photon.position[2]);
-            glEnd();
         }
+        glEnd();
 
         glDisable(GL_BLEND);
     }
 
-    if (type == 2 || type == 6) {
+    if ((type == 2 || type == 6) && !initialCausticsPhotons.empty()) {
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-        for (const Photon &photon : initialCausticsPhotons) {
-            glColor4f(initialCausticsPhotons[0].color[0], initialCausticsPhotons[0].color[1], initialCausticsPhotons[0].color[2], 0.2f);
-            glBegin(GL_LINES);
+        glColor4f(initialCausticsPhotons[0].color[0], initialCausticsPhotons[0].color[1], initialCausticsPhotons[0].color[2], 0.2f);
+        glBegin(GL_LINES);
+        for (int i = 0; i < std::min(10000, static_cast<int>(initialCausticsPhotons.size())); i++) {
+            const Photon &photon = initialCausticsPhotons[i];
             glVertex3f(photon.position[0], photon.position[1], photon.position[2]);
             glVertex3f(photon.direction[0], photon.direction[1], photon.direction[2]);
-            glEnd();
         }
+        glEnd();
 
         glDisable(GL_BLEND);
     }
-
 
     glEnable(GL_LIGHTING);
     glDisable(GL_COLOR_MATERIAL);
