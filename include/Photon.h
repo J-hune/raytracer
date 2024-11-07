@@ -12,11 +12,9 @@
  * Structure representing a photon.
  */
 struct Photon {
-    Vec3 position;              ///< Position of the photon.
-    Vec3 direction;             ///< Direction of the photon.
-    Vec3 color;                 ///< Color of the photon.
-    Vec3 debugColor;            ///< Debug color of the photon.
-    short flag = 0;             ///< Flag to indicate if the photon has been through a specular reflection (at least once).
+    Vec3 position;      ///< Position of the photon.
+    Vec3 direction;     ///< Direction of the photon.
+    Vec3 color;         ///< Color of the photon.
 
     /**
      * Gets the position of the photon.

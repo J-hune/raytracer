@@ -42,11 +42,11 @@ public:
 
     /**
      * Computes the caustics effect at a given position.
-     * @param position The position to compute the caustics effect.
-     * @param material The material at the position.
+     * @param intersection The intersection details.
+     * @param settings The settings of the application.
      * @return The color of the caustics effect.
      */
-    [[nodiscard]] Vec3 computeCaustics(const Vec3 &position, const Material &material) const;
+    [[nodiscard]] Vec3 computeIndirectIllumination(const RaySceneIntersection &intersection, const Settings &settings) const;
 
     /**
      * Draws the photons for debugging purposes.
@@ -109,11 +109,12 @@ private:
      * @param localPhotons Vector to store the processed photons.
      * @param photonType The type of photons to process.
      * @param absorbed Flag to indicate if the photon was absorbed.
+     * @param bounces The number of bounces.
      */
-    void processPhotonInteraction(Photon &photon, const RaySceneIntersection &intersection,
-                                  std::uniform_real_distribution<float> &dist, std::mt19937 &rng,
-                                  std::vector<Photon> &localPhotonsToEmit, std::vector<Photon> &localPhotons,
-                                  int photonType, bool &absorbed);
+    void processPhotonInteraction(Photon& photon, const RaySceneIntersection& intersection,
+                                  std::uniform_real_distribution<float>& dist, std::mt19937& rng,
+                                  std::vector<Photon>& localPhotonsToEmit, std::vector<Photon>& localPhotons,
+                                  int photonType, bool& absorbed, int bounces);
 
     /**
      * Processes a diffuse photon.
@@ -124,11 +125,12 @@ private:
      * @param localPhotons Vector to store the processed photons.
      * @param photonType The type of photons to process.
      * @param absorbed Flag to indicate if the photon was absorbed.
+     * @param bounces The number of bounces.
      */
-    static void processDiffusePhoton(Photon &photon, const RaySceneIntersection &intersection,
-        std::uniform_real_distribution<float> &dist, std::mt19937 &rng,
-        std::vector<Photon> &localPhotons, int photonType, bool &absorbed
-    );
+    static void processDiffusePhoton(Photon& photon, const RaySceneIntersection& intersection,
+                                     std::uniform_real_distribution<float>& dist, std::mt19937& rng,
+                                     std::vector<Photon>& localPhotons, int photonType, bool& absorbed, int bounces
+            );
 
     /**
      * Normalizes the colors of the photons.
@@ -148,12 +150,11 @@ private:
      * @param kdTree KD tree of the meshes.
      * @param photonMutex Mutex for synchronizing photon emission.
      * @param photons Vector to store emitted photons.
-     * @param photonsToEmit Vector to store photons to be emitted.
      */
-    void emitPhotonsForThread(int photonCount, int photonType, const std::vector<Light> &lights,
-                              const std::vector<Sphere> &spheres, const std::vector<Square> &squares,
-                              const std::vector<Mesh> &meshes, const MeshKDTree &kdTree, std::mutex &photonMutex,
-                              std::vector<Photon> &photons, std::vector<Photon> &photonsToEmit);
+    int emitPhotonsForThread(int photonCount, int photonType, const std::vector<Light> &lights,
+                             const std::vector<Sphere> &spheres, const std::vector<Square> &squares,
+                             const std::vector<Mesh> &meshes, const MeshKDTree &kdTree, std::mutex &photonMutex,
+                             std::vector<Photon> &photons);
 
     /**
      * Generates a random direction for photon emission.

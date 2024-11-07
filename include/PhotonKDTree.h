@@ -4,8 +4,9 @@
 #include "Vec3.h"
 #include "Photon.h"
 
-#include <vector>
 #include <memory>
+#include <queue>
+#include <vector>
 
 // -------------------------------------------
 // PhotonKDNode Structure
@@ -24,6 +25,20 @@ struct PhotonKDNode {
      * @param data Photon data to be stored in the node.
      */
     explicit PhotonKDNode(const Photon &data) : data(data) {}
+};
+
+
+// -------------------------------------------
+// PhotonDistanceComparator Structure
+// -------------------------------------------
+
+/**
+ * Structure representing a comparator for photon distances.
+ */
+struct PhotonDistanceComparator {
+    bool operator()(const std::pair<float, Photon>& a, const std::pair<float, Photon>& b) const {
+        return a.first < b.first; // Prioritize larger distances
+    }
 };
 
 // -------------------------------------------
@@ -55,10 +70,13 @@ public:
     /**
      * Finds the nearest neighbors of a given point within a specified maximum distance.
      * @param point The point to find the nearest neighbors for.
+     * @param normal The normal of the point.
      * @param maxDistance The maximum distance to search for neighbors.
+     * @param maxCount The maximum number of neighbors to find.
      * @return Vector of nearest photons within the specified distance.
      */
-    [[nodiscard]] std::vector<Photon> findNearestNeighbors(const Vec3 &point, float maxDistance) const;
+    [[nodiscard]] std::vector<Photon> findNearestNeighbors(const Vec3 &point, const Vec3 &normal, float maxDistance,
+        int maxCount) const;
 
 private:
     std::unique_ptr<PhotonKDNode> root; ///< Root node of the KD tree.
@@ -78,17 +96,21 @@ private:
      * @param depth Current depth of the tree.
      * @return Pointer to the root node of the built KD tree.
      */
-    PhotonKDNode *buildPhotonBalancedTree(std::vector<Photon> &elements, int start, int end, int depth);
+    static PhotonKDNode *buildPhotonBalancedTree(std::vector<Photon> &elements, int start, int end, int depth);
 
     /**
      * Recursively finds the nearest neighbors of a given point within a specified maximum distance.
      * @param node The current node.
      * @param point The point to find the nearest neighbors for.
+     * @param normal The normal of the point.
      * @param maxDistSq The maximum distance squared to search for neighbors.
      * @param depth Current depth of the tree.
+     * @param maxCount The maximum number of neighbors to find.
      * @param nearestElements Vector to store the nearest neighbors found.
      */
-    void findNearestNeighborsRecursive(const PhotonKDNode *node, const Vec3 &point, float maxDistSq, int depth, std::vector<std::pair<float, Photon>> &nearestElements) const;
+    static void findNearestNeighborsRecursive(const PhotonKDNode *node, const Vec3 &point, const Vec3 &normal,
+        float maxDistSq, int depth, int maxCount, std::priority_queue<std::pair<float, Photon>,
+        std::vector<std::pair<float, Photon>>, PhotonDistanceComparator> &nearestElements);
 };
 
 #endif // PHOTONKD_TREE_H
