@@ -22,38 +22,6 @@ std::vector<Triangle> Mesh::getTriangles() const {
     return meshTriangles;
 }
 
-// Load mesh from OFF file
-void Mesh::loadOFF(const std::string& filename) {
-    std::ifstream in(filename);
-    if (!in) {
-        std::cerr << "Failed to open file: " << filename << std::endl;
-        exit(EXIT_FAILURE);
-    }
-
-    std::string offString;
-    unsigned int sizeV, sizeT, tmp;
-    in >> offString >> sizeV >> sizeT >> tmp;
-
-    vertices.resize(sizeV);
-    triangles.resize(sizeT);
-
-    for (unsigned int i = 0; i < sizeV; i++) {
-        in >> vertices[i].position;
-    }
-
-    for (unsigned int i = 0; i < sizeT; i++) {
-        unsigned int s;
-        in >> s;
-        for (unsigned int & j : triangles[i].v) {
-            in >> j;
-        }
-    }
-    in.close();
-
-    // Compute AABB of the mesh
-    computeAABB();
-}
-
 // Recompute normals for each vertex
 void Mesh::recomputeNormals() {
     for (auto &vertice: vertices) {
@@ -201,6 +169,13 @@ void Mesh::draw() const {
         1.0
     };
 
+    if (textureID > 0) {
+        glEnable(GL_TEXTURE_2D);
+        glBindTexture(GL_TEXTURE_2D, textureID);
+        glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+        glTexCoordPointer(2, GL_FLOAT, 2 * sizeof(float), uvs_array.data());
+    }
+
     const GLfloat material_specular[4] = {
         material.specular_material[0],
         material.specular_material[1],
@@ -218,13 +193,18 @@ void Mesh::draw() const {
     glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, material_specular);
     glMaterialfv(GL_FRONT_AND_BACK, GL_DIFFUSE, material_color);
     glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT, material_ambient);
-    glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, material.shininess);
+    glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, static_cast<GLfloat>(material.shininess));
 
     glEnableClientState(GL_VERTEX_ARRAY) ;
     glEnableClientState (GL_NORMAL_ARRAY);
-    glNormalPointer (GL_FLOAT, 3*sizeof (float), (GLvoid*)(normals_array.data()));
-    glVertexPointer (3, GL_FLOAT, 3*sizeof (float) , (GLvoid*)(positions_array.data()));
-    glDrawElements(GL_TRIANGLES, triangles_array.size(), GL_UNSIGNED_INT, (GLvoid*)(triangles_array.data()));
+    glNormalPointer(GL_FLOAT, 3 * sizeof(float), normals_array.data());
+    glVertexPointer(3, GL_FLOAT, 3 * sizeof(float), positions_array.data());
+    glDrawElements(GL_TRIANGLES, static_cast<int>(triangles_array.size()), GL_UNSIGNED_INT, triangles_array.data());
+
+    if (textureID > 0) {
+        glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+        glDisable(GL_TEXTURE_2D);
+    }
 }
 
 MeshVertex Mesh::getRandomPointOnSurface(std::mt19937 &rng) const {
@@ -307,4 +287,97 @@ RayIntersection Mesh::intersect(const Ray& ray) const {
     }
 
     return closestIntersection;
+}
+
+// Load mesh from OFF file
+void Mesh::loadOFF(const std::string &filename) {
+    std::ifstream in(filename);
+    if (!in) {
+        std::cerr << "Failed to open file: " << filename << std::endl;
+        exit(EXIT_FAILURE);
+    }
+
+    std::string offString;
+    unsigned int sizeV, sizeT, tmp;
+    in >> offString >> sizeV >> sizeT >> tmp;
+
+    vertices.resize(sizeV);
+    triangles.resize(sizeT);
+
+    for (unsigned int i = 0; i < sizeV; i++) {
+        in >> vertices[i].position;
+    }
+
+    for (unsigned int i = 0; i < sizeT; i++) {
+        unsigned int s;
+        in >> s;
+        for (unsigned int &j: triangles[i].v) {
+            in >> j;
+        }
+    }
+    in.close();
+
+    // Compute AABB of the mesh
+    computeAABB();
+}
+
+void Mesh::loadTexture(const std::string &filename) {
+    // Open PPM file in binary mode
+    std::ifstream file(filename, std::ios::binary);
+    if (!file) {
+        std::cerr << "Failed to open PPM file: " << filename << std::endl;
+        return;
+    }
+
+    std::string header;
+    int maxColor = 0;
+
+    // Read header and skip comments
+    file >> header;
+    while (file.peek() == '#' || file.peek() == '\n') file.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+    file >> textureWidth >> textureHeight >> maxColor;
+    file.ignore();
+
+    if (header != "P6" || maxColor != 255) {
+        std::cerr << "Invalid PPM file: " << filename << std::endl;
+        return;
+    }
+
+    texture_array.resize(textureWidth * textureHeight * 3);
+    if (!file.read(reinterpret_cast<char*>(texture_array.data()), static_cast<std::streamsize>(texture_array.size()))) {
+        std::cerr << "Failed to read pixel data from file: " << filename << std::endl;
+        return;
+    }
+
+    // Generate OpenGL texture
+    glGenTextures(1, &textureID);
+    glBindTexture(GL_TEXTURE_2D, textureID);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, textureWidth, textureHeight, 0, GL_RGB, GL_UNSIGNED_BYTE, texture_array.data());
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+}
+
+
+Vec3 Mesh::sampleTexture(float u, float v) const {
+    // Clamp UV coordinates to [0, 1]
+    u = std::clamp(u, 0.0f, 1.0f);
+    v = std::clamp(v, 0.0f, 1.0f);
+
+    // Convert UV coordinates to pixel coordinates
+    const int x = static_cast<int>(u * (static_cast<float>(textureWidth) - 1.0f));
+    const int y = static_cast<int>(v * (static_cast<float>(textureHeight) - 1.0f));
+
+    // Calculate the index in the texture data
+    const int index = (y * textureWidth + x) * 3; // Assuming RGB format
+
+    // Get the color values (ensure index is within bounds)
+    if (index < 0 || index + 2 >= static_cast<int>(texture_array.size())) {
+        return {-1.0f, -1.0f, -1.0f};
+    }
+
+    const float r = static_cast<float>(texture_array[index]) / 255.0f;
+    const float g = static_cast<float>(texture_array[index + 1]) / 255.0f;
+    const float b = static_cast<float>(texture_array[index + 2]) / 255.0f;
+
+    return {r, g, b};
 }

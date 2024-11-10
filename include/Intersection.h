@@ -2,12 +2,10 @@
 #define INTERSECTION_H
 
 #include <vector>
-#include "Ray.h"
 #include "Mesh.h"
+#include "Ray.h"
 #include "Sphere.h"
 #include "Square.h"
-#include "Triangle.h"
-#include <cfloat>
 
 #include "MeshKDTree.h"
 
@@ -15,9 +13,10 @@
  * Structure representing the intersection of a ray with a scene.
  */
 struct RaySceneIntersection : RayIntersection{
+    Vec3 textureColor;          ///< Texture color at the intersection point.
     Material material;          ///< Material at the intersection point.
-    RaySceneIntersection() : RayIntersection(), material() {}
-    explicit RaySceneIntersection(const RayIntersection &intersection) : RayIntersection(intersection), material() {}
+    RaySceneIntersection() : RayIntersection() {}
+    explicit RaySceneIntersection(const RayIntersection &intersection) : RayIntersection(intersection) {}
 };
 
 /**

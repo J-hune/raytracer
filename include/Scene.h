@@ -69,11 +69,12 @@ public:
 
         // Add direct illumination
         if (settings.directIllumination && intersection.material.type == Material_Diffuse_Blinn_Phong) {
-            const Vec3 directIlluminationColor = computeDirectIllumination(
-                ray, intersection.intersection, intersection.normal,
-                intersection.material, settings, rng
-            );
-            color += directIlluminationColor;
+            if (intersection.textureColor != Vec3(-1.0f)) {
+                color = intersection.textureColor;
+            } else {
+                const Vec3 directIlluminationColor = computeDirectIllumination(ray, intersection, settings, rng);
+                color += directIlluminationColor;
+            }
         }
 
         if ((settings.indirectIllumination || settings.caustics) && intersection.material.type == Material_Diffuse_Blinn_Phong) {
@@ -101,12 +102,13 @@ public:
         return color; // Return the accumulated color
     }
 
-    Vec3 computeDirectIllumination(const Ray &ray, const Vec3 &intersectionPoint, const Vec3 &normal, const Material &material, const Settings &settings, std::mt19937 &rng) {
+    Vec3 computeDirectIllumination(const Ray &ray, const RaySceneIntersection &intersection, const Settings &settings, std::mt19937 &rng) {
         Vec3 color(0.0f, 0.0f, 0.0f);
         const Vec3 ambientLight(0.1f, 0.1f, 0.1f); // Ambient light
 
         // Add the ambient light to the color
-        color += Vec3::compProduct(material.ambient_material, ambientLight);
+        color += Vec3::compProduct(intersection.material.ambient_material, ambientLight);
+        if (intersection.textureColor != Vec3(-1.0f)) color = intersection.textureColor;
 
         // Pre-normalize the view vector
         Vec3 viewDir = -ray.direction();
@@ -115,9 +117,9 @@ public:
         // For each light in the scene
         for (const auto &light: lights) {
             if (light.type == LightType_Spherical) {
-                color += computeSphericalLight(intersectionPoint, normal, material, light, viewDir);
+                color += computeSphericalLight(intersection.intersection, intersection.normal, intersection.material, light, viewDir);
             } else if (light.type == LightType_Quad) {
-                color += computeQuadLight(intersectionPoint, normal, material, light, viewDir, settings, rng);
+                color += computeQuadLight(intersection.intersection, intersection.normal, intersection.material, light, viewDir, settings, rng);
             }
         }
 
@@ -221,6 +223,24 @@ public:
         addSphere(Vec3(0., 0., 0.), 1.f, Material_Diffuse_Blinn_Phong, Vec3(0.811, 0.031, 0.129), Vec3(0.2, 0.2, 0.2), 20);
     }
 
+    void setup_single_sphere_with_texture() {
+        const Settings &settings = Settings::getInstance();
+        drawCaustics = false;
+        addLight(Vec3(-5, 5, 5), LightType_Spherical, Vec3(1, 1, 1), 2.5f, 2.f);
+        addSphere(Vec3(0., 0., 0.), 1.f, Material_Diffuse_Blinn_Phong,
+            Vec3(1.0f), Vec3(1.0f), 20, 0.f, 0.f, "../img/sphereTextures/s1.ppm");
+        if (settings.useKDTree) kdTree = MeshKDTree(meshes);
+    }
+
+    void tetrahedron_with_texture() {
+        const Settings &settings = Settings::getInstance();
+        drawCaustics = false;
+        addLight(Vec3(-5, 5, 5), LightType_Spherical, Vec3(1, 1, 1), 2.5f, 2.f);
+        addMesh("../data/tetrahedron.off", Vec3(0.0, 0.0, 0.0), Vec3(1.f),
+            Material_Diffuse_Blinn_Phong, Vec3(1.0f), Vec3(1.0f), 20, 0.f, 0.f, "../img/sphereTextures/s4.ppm");
+        if (settings.useKDTree) kdTree = MeshKDTree(meshes);
+    }
+
     void setup_multiple_spheres() {
         drawCaustics = false;
         addLight(Vec3(-5, 5, 5), LightType_Spherical, Vec3(1, 1, 1), 1.5f, 2.f);
@@ -238,13 +258,13 @@ public:
     void setup_cornell_box_with_2_spheres() {
         setup_cornell_box();
         addSphere(Vec3(1.0, -1.25, 0.5), 0.75f, Material_Glass, Vec3(0.f), Vec3(1.f), 16, 1.0, 1.5);
-        addSphere(Vec3(-1.0, -1.25, -0.5), 0.75f, Material_Mirror, Vec3(0.f), Vec3(1.f), 16, 0.f, 0.f);
+        addSphere(Vec3(-1.0, -1.25, -0.5), 0.75f, Material_Mirror, Vec3(0.f), Vec3(1.f), 16);
     }
 
     void setup_cornell_box_with_3_spheres() {
         setup_cornell_box();
         addSphere(Vec3(0.5, -1.49, 0.8), 0.5f, Material_Glass, Vec3(0.f), Vec3(1.f), 16, 1.0, 1.5);
-        addSphere(Vec3(-1.0, -1.24, -0.5), 0.75f, Material_Mirror, Vec3(0.f), Vec3(1.f), 16, 0.f, 0.f);
+        addSphere(Vec3(-1.0, -1.24, -0.5), 0.75f, Material_Mirror, Vec3(0.f), Vec3(1.f), 16);
         addSphere(Vec3(0.8, -0.99, -1), 1.f, Material_Diffuse_Blinn_Phong, Vec3(0.654, 0.776, 0.509), Vec3(0.439, 0.776, 0.254), 20);
     }
 
@@ -258,6 +278,17 @@ public:
         if (settings.useKDTree) kdTree = MeshKDTree(meshes);
     }
 
+    void setup_SaintPetersBasilica_box() {
+        drawCaustics = false;
+        setup_cornell_box_with_texture("SaintPetersBasilica");
+        addSphere(Vec3(0.0, 0.0, 0.0), 2.5f, Material_Mirror, Vec3(0.f), Vec3(1.f), 16);
+    }
+
+    void setup_PondNight_box() {
+        drawCaustics = false;
+        setup_cornell_box_with_texture("PondNight");
+        addSphere(Vec3(0.0, 0.0, 0.0), 2.5f, Material_Glass, Vec3(0.f), Vec3(1.f), 16, 1.0, 1.15);
+    }
 
     /******************************************************************************************************************/
     /********************************************* SCENE SETUP FUNCTIONS **********************************************/
@@ -267,9 +298,10 @@ public:
         lights.emplace_back(position, type, color, intensity, size, false);
     }
 
-    void addSphere(const Vec3 &center, const float radius, const MaterialType materialType, const Vec3 &diffuseColor,
-                   const Vec3 &specularColor, const float shininess, const float transparency = 0.f, const float indexMedium = 0.f) {
+    void addSphere(const Vec3 &center, const float radius, const MaterialType materialType, const Vec3 &diffuseColor, const Vec3 &specularColor,
+        const float shininess, const float transparency = 0.f, const float indexMedium = 0.f, const std::string &texturePath="") {
         Sphere s;
+        if (!texturePath.empty()) s.loadTexture(texturePath);
         s.m_center = center;
         s.m_radius = radius;
         s.buildArrays();
@@ -283,8 +315,9 @@ public:
     }
 
     void addSquare(const Vec3 &quadPos, const Vec3 &quadWidth, const Vec3 &quadHeight, const float scaleWidth, const float scaleHeight,
-        const Vec3 &diffuseColor, const Vec3 &specularColor, const float shininess) {
+        const Vec3 &diffuseColor, const Vec3 &specularColor, const float shininess, const std::string &texturePath="") {
         Square s;
+        if (!texturePath.empty()) s.loadTexture(texturePath);
         s.setQuad(quadPos, quadWidth, quadHeight, scaleWidth, scaleHeight);
         s.buildArrays();
         s.material.diffuse_material = diffuseColor;
@@ -295,9 +328,10 @@ public:
 
     void addMesh(const std::string &filePath, const Vec3 &translation, const Vec3 &scale, const MaterialType materialType,
                  const Vec3 &diffuseColor, const Vec3 &specularColor, const float shininess,
-                 const float transparency = 0.f, const float indexMedium = 0.f) {
+                 const float transparency = 0.f, const float indexMedium = 0.f, const std::string &texturePath="") {
         meshes.emplace_back();
         Mesh &m = meshes.back();
+        if (!texturePath.empty()) m.loadTexture(texturePath);
         m.loadOFF(filePath);
         m.scale(scale);
         m.translate(translation);
@@ -402,6 +436,58 @@ public:
             s.material.diffuse_material = Vec3(0.8, 0.8, 0.8);
             s.material.specular_material = s.material.diffuse_material * 0.05f;
             s.material.shininess = 5;
+        }
+    }
+
+    void setup_cornell_box_with_texture(const std::string &textureName) {
+        {
+            // Back Wall
+            Square s;
+            s.setQuad(Vec3(2., 2., -2.) * 4, Vec3(-2., 0., 0.), Vec3(0., -2., 0.), 4. * 4, 4. * 4);
+            s.loadTexture("../img/" + textureName + "/negz.ppm");
+            s.buildArrays();
+            s.material.diffuse_material = Vec3(1.0, 1.0, 1.0);
+            squares.push_back(s);
+        } {
+            // Left Wall
+            Square s;
+            s.setQuad(Vec3(-2., 2., -2.) * 4, Vec3(0., 0., 2.), Vec3(0., -2, 0.), 4. * 4, 4. * 4);
+            s.loadTexture("../img/" + textureName + "/negx.ppm");
+            s.material.diffuse_material = Vec3(1.0, 1.0, 1.0);
+            s.buildArrays();
+            squares.push_back(s);
+        } {
+            // Right Wall
+            Square s;
+            s.loadTexture("../img/" + textureName + "/posx.ppm");
+            s.material.diffuse_material = Vec3(1.0, 1.0, 1.0);
+            s.setQuad(Vec3(2., 2., 2.) * 4, Vec3(0., 0., -2.), Vec3(0., -2., 0.), 4. * 4, 4. * 4);
+            s.buildArrays();
+            squares.push_back(s);
+        } {
+            // Floor
+            Square s;
+            if (!textureName.empty()) s.loadTexture("../img/" + textureName + "/negy.ppm");
+            s.setQuad(Vec3(-2., -2., 2.) * 4, Vec3(2., 0., 0.), Vec3(0., 0., -2.) , 4. * 4, 4. * 4);
+            s.buildArrays();
+            s.material.diffuse_material = Vec3(1.0, 1.0, 1.0);
+            squares.push_back(s);
+        } {
+            // Ceiling
+            Square s;
+            if (!textureName.empty()) s.loadTexture("../img/" + textureName + "/posy.ppm");
+            s.setQuad(Vec3(-2., 2., -2.) * 4, Vec3(2., 0., 0.), Vec3(0., 0., 2.), 4. * 4, 4. * 4);
+            s.buildArrays();
+            s.material.diffuse_material = Vec3(1.0, 1.0, 1.0);
+            squares.push_back(s);
+        } {
+            // Front Wall
+            Square s;
+            if (!textureName.empty()) s.loadTexture("../img/" + textureName + "/posz.ppm");
+            s.setQuad(Vec3(-2., 2., 2.) * 4, Vec3(2., 0., 0.), Vec3(0., -2., 0.), 4. * 4, 4. * 4);
+            s.buildArrays();
+            s.material.diffuse_material = Vec3(1.0, 1.0, 1.0);
+            squares.push_back(s);
         }
     }
 };

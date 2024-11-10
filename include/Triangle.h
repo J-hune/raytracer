@@ -8,7 +8,6 @@
  * Structure for ray-triangle intersection results.
  */
 struct RayTriangleIntersection : RayIntersection {
-    float w0{}, w1{}, w2{}; ///< Barycentric coordinates.
     unsigned int tIndex{};  ///< Triangle index.
 };
 
@@ -157,6 +156,8 @@ public:
             intersection.t = t;
             intersection.intersection = ray.origin() + ray.direction() * t;
             intersection.normal = Vec3::cross(edge1, edge2).normalized();
+            intersection.u = u;
+            intersection.v = v;
         }
 
         return intersection;

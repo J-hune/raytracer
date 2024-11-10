@@ -17,6 +17,7 @@ struct RayIntersection {
     float t{};                   ///< The distance from the ray origin to the intersection point.
     Vec3 intersection;           ///< The intersection point.
     Vec3 normal;                 ///< The normal at the intersection point.
+    float u{}, v{};              ///< Texture coordinates.
 };
 
 // -------------------------------------------
