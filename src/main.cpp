@@ -337,6 +337,7 @@ void ray_trace_from_camera(const Settings &settings) {
     f << "# Max caustics distance: " << settings.maxCausticsDistance << "\n";
     f << "# Photon count for indirect color estimation: " << settings.photonCountForIndirectColorEstimation << "\n";
     f << "# Photon count for caustics color estimation: " << settings.photonCountForCausticsColorEstimation << "\n";
+    f << "# Threads: " << numThreads << "\n";
     for (const auto &pixel: image) {
         f << static_cast<int>(255.f * std::min(1.f, pixel[0])) << " "
           << static_cast<int>(255.f * std::min(1.f, pixel[1])) << " "
@@ -519,13 +520,15 @@ int main(int argc, char **argv) {
 
     camera.move(0., 0., -3.1);
     selected_scene = 4;
-    scenes.resize(6);
+    scenes.resize(8);
     scenes[0].setup_single_sphere();
     scenes[1].setup_multiple_spheres();
     scenes[2].setup_single_square();
     scenes[3].setup_cornell_box_with_2_spheres();
     scenes[4].setup_cornell_box_mesh();
     scenes[5].setup_cornell_box_with_3_spheres();
+    scenes[6].setup_SaintPetersBasilica_box();
+    scenes[7].setup_PondNight_box();
     glutMainLoop();
 
     return EXIT_SUCCESS;

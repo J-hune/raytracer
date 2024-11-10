@@ -23,6 +23,7 @@ const std::vector<Square> &squares, const std::vector<Mesh> &meshes, const MeshK
         if (intersection.intersectionExists && intersection.t <= result.t) {
             result = RaySceneIntersection(intersection);
             result.material = sphere.material;
+            result.textureColor = sphere.sampleTexture(intersection.u, intersection.v);
         }
     }
 
@@ -38,6 +39,7 @@ const std::vector<Square> &squares, const std::vector<Mesh> &meshes, const MeshK
         if (intersection.intersectionExists && intersection.t <= result.t && intersection.t > z_near) {
             result = RaySceneIntersection(intersection);
             result.material = square.material;
+            result.textureColor = square.sampleTexture(intersection.u, intersection.v);
         }
     }
 
@@ -49,6 +51,7 @@ const std::vector<Square> &squares, const std::vector<Mesh> &meshes, const MeshK
             if (intersection.intersectionExists && intersection.t <= result.t && intersection.t > z_near) {
                 result = RaySceneIntersection(intersection);
                 result.material = meshes[intersection.tIndex].material;
+                result.textureColor = meshes[intersection.tIndex].sampleTexture(intersection.u, intersection.v);
             }
         }
     }

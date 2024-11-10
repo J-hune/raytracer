@@ -85,6 +85,7 @@ protected:
     std::vector<float> normals_array;           ///< Array of vertex normals.
     std::vector<float> uvs_array;               ///< Array of texture coordinates.
     std::vector<unsigned int> triangles_array;  ///< Array of triangle vertex indices.
+    std::vector<uint8_t> texture_array;         ///< Array of texture colors.
 
 public:
     virtual ~Mesh() = default;
@@ -93,6 +94,9 @@ public:
     std::vector<MeshTriangle> triangles;    ///< List of triangles in the mesh.
     Material material;                      ///< Material properties of the mesh.
     AABB aabb;                              ///< Axis-aligned bounding box of the mesh.
+    GLuint textureID = 0;                   ///< OpenGL texture ID.
+    int textureWidth = 0;                   ///< Width of the texture.
+    int textureHeight = 0;                  ///< Height of the texture.
 
     /**
      * Gets the position of the mesh.
@@ -110,7 +114,22 @@ public:
      * Loads a mesh from an OFF file.
      * @param filename The name of the OFF file.
      */
-    void loadOFF(const std::string& filename);
+    void loadOFF(const std::string &filename);
+
+    /**
+     * Loads a texture from a PPM file.
+     * @param filename The name of the PPM file.
+     * @return The OpenGL texture ID.
+     */
+    void loadTexture(const std::string &filename);
+
+    /**
+     * Samples the texture at the specified UV coordinates.
+     * @param u The U coordinate.
+     * @param v The V coordinate.
+     * @return The color of the texture at the specified coordinates.
+     */
+    [[nodiscard]] Vec3 sampleTexture(float u, float v) const;
 
     /**
      * Gets a random point on the surface of the mesh.
@@ -193,11 +212,6 @@ public:
      * @return The intersection information.
      */
     [[nodiscard]] virtual RayIntersection intersect(const Ray& ray) const;
-
-    /**
-     * Draws the axis-aligned bounding box of the mesh.
-     */
-    void drawAABB() const;
 
 private:
     /**

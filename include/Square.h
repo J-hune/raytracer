@@ -7,17 +7,6 @@
 #include <cmath>
 
 // -------------------------------------------
-// RaySquareIntersection Structure
-// -------------------------------------------
-
-/**
- * Structure to hold the results of a ray-square intersection.
- */
-struct RaySquareIntersection : RayIntersection {
-    float u{}, v{};
-};
-
-// -------------------------------------------
 // Square Class
 // -------------------------------------------
 
@@ -103,7 +92,7 @@ public:
      * @return A RayIntersection object containing the intersection details.
      */
     [[nodiscard]] RayIntersection intersect(const Ray &ray) const override {
-        RaySquareIntersection intersection;
+        RayIntersection intersection;
         intersection.intersectionExists = false;
 
         const Vec3 normal = Vec3::cross(m_right_vector, m_up_vector).normalized();

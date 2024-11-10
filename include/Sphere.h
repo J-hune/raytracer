@@ -7,18 +7,6 @@
 #include <vector>
 
 // -------------------------------------------
-// RaySphereIntersection Structure
-// -------------------------------------------
-
-/**
- * Structure to hold the results of a ray-sphere intersection.
- */
-struct RaySphereIntersection : RayIntersection {
-    float theta{}, phi{};
-    Vec3 secondIntersection;
-};
-
-// -------------------------------------------
 // Sphere Class
 // -------------------------------------------
 
@@ -58,8 +46,8 @@ public:
                 normals_array[3 * vertexIndex + 0] = xyz[0];
                 normals_array[3 * vertexIndex + 1] = xyz[1];
                 normals_array[3 * vertexIndex + 2] = xyz[2];
-                uvs_array[2 * vertexIndex + 0] = u;
-                uvs_array[2 * vertexIndex + 1] = v;
+                uvs_array[2 * vertexIndex + 0] = std::fmod(u - 0.5f, 1.0f); // Add 0.5 to shift the texture to match OpenGL
+                uvs_array[2 * vertexIndex + 1] = 1 - v; // Flip the V coordinate to match OpenGL
             }
         }
 
@@ -106,10 +94,10 @@ public:
     /**
      * Computes the intersection of the ray with the sphere.
      * @param ray The ray to test for intersection.
-     * @return A RaySphereIntersection object containing the intersection details.
+     * @return A RayIntersection object containing the intersection details.
      */
     [[nodiscard]] RayIntersection intersect(const Ray &ray) const override {
-        RaySphereIntersection intersection;
+        RayIntersection intersection;
         const Vec3 oc = ray.origin() - m_center; // Vector from sphere center to ray origin
         const Vec3 d = ray.direction(); // Ray direction
 
@@ -143,10 +131,11 @@ public:
         // Calculate intersection point
         intersection.intersection = ray.origin() + intersection.t * ray.direction();
 
-        // Calculate second intersection point if applicable
-        if (t1 > 0 && t2 > 0) {
-            intersection.secondIntersection = ray.origin() + t2 * ray.direction();
-        }
+        // Calculate second intersection point if applicable NOTE: This is not used in the current implementation
+        //intersection.secondIntersection = ray.origin() + t2 * ray.direction();
+
+        intersection.u = 0.5f + std::atan2(intersection.intersection[1], intersection.intersection[0]) / (2.0f * M_PIf);
+        intersection.v = 0.5f - std::asin((intersection.intersection[2]) / m_radius) / M_PIf;
 
         // Calculate the normal at the intersection point
         intersection.normal = (intersection.intersection - m_center) / m_radius;
