@@ -76,7 +76,7 @@ void PhotonKDTree::findNearestNeighborsRecursive(
     const float distToPlane = Vec3::dot(toPhoton, normal);
 
     // Check if the photon is within the disk region (both distance to center and distance to the plane)
-    if (distSqToCenter < maxDistSq && std::fabs(distToPlane) < 1e-5f) {
+    if (distSqToCenter < maxDistSq && distToPlane < 1e-5f) {
         // Add photon to the results if it's within the allowed distance
         if (static_cast<int>(nearestElements.size()) < maxCount) {
             nearestElements.emplace(distSqToCenter, node->data);
