@@ -26,6 +26,15 @@ public:
     PhotonKDTree globalPhotonTree; ///< KD tree for global photons.
     PhotonKDTree causticsPhotonTree; ///< KD tree for caustics photons.
 
+    void clear() {
+        globalPhotonTree.clear();
+        causticsPhotonTree.clear();
+        initialGlobalPhotons.clear();
+        initialCausticsPhotons.clear();
+        globalPhotons.clear();
+        causticsPhotons.clear();
+    }
+
     /**
      * Emits photons from the given lights and objects.
      * @param lights Vector of lights to emit photons from.

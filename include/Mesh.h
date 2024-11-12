@@ -88,7 +88,12 @@ protected:
     std::vector<uint8_t> texture_array;         ///< Array of texture colors.
 
 public:
-    virtual ~Mesh() = default;
+    virtual ~Mesh() {
+        if (textureID != 0) {
+            glDeleteTextures(1, &textureID);
+            textureID = 0;
+        }
+    }
 
     std::vector<MeshVertex> vertices;       ///< List of vertices in the mesh.
     std::vector<MeshTriangle> triangles;    ///< List of triangles in the mesh.

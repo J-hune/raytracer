@@ -19,9 +19,9 @@ void MeshKDTree::getElementsRecursive(const MeshKDNode *node, std::vector<Triang
     getElementsRecursive(node->right.get(), elements);
 }
 
-MeshKDNode *MeshKDTree::buildBalancedTree(const std::vector<Mesh> &elements) {
+std::unique_ptr<MeshKDNode> MeshKDTree::buildBalancedTree(const std::vector<Mesh> &elements) {
     const Settings &settings = Settings::getInstance();
-    if (root != nullptr || elements.empty()) return nullptr; // Tree already built or no elements to build from
+    if (elements.empty()) return nullptr;
 
     // Collect all triangles from the meshes
     std::vector<Triangle> sceneTriangles;
@@ -33,7 +33,7 @@ MeshKDNode *MeshKDTree::buildBalancedTree(const std::vector<Mesh> &elements) {
     // Calculate the axis-aligned bounding box (AABB) of the scene
     const AABB sceneAABB = Triangle::getAABB(sceneTriangles);
     auto node = buildRecursiveBalancedTree(sceneTriangles, sceneAABB, 0, settings.maxKdTreeDepth);
-    return node.release();
+    return node;
 }
 
 std::unique_ptr<MeshKDNode> MeshKDTree::buildRecursiveBalancedTree(const std::vector<Triangle> &vector, const AABB &aabb, const int depth, int maxDepth) {

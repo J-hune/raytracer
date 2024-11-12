@@ -26,6 +26,17 @@ class Scene {
 public:
     Scene() = default;
 
+    void unload() {
+        meshes.clear();
+        spheres.clear();
+        squares.clear();
+        lights.clear();
+        photonMap.clear();
+        kdTree.clear();
+        photonsEmitted = false;
+        drawCaustics = true;
+    }
+
     void draw() {
         const Settings &settings = Settings::getInstance();
 
@@ -217,6 +228,37 @@ public:
     /********************************************* SCENE SETUP FUNCTIONS **********************************************/
     /******************************************************************************************************************/
 
+    void loadScene(const unsigned int sceneId) {
+        switch (sceneId) {
+            case 0:
+                setup_single_sphere();
+                break;
+            case 1:
+                setup_multiple_spheres();
+                break;
+            case 2:
+                setup_single_square();
+                break;
+            case 3:
+                setup_cornell_box_with_2_spheres();
+                break;
+            case 4:
+                setup_cornell_box_mesh();
+                break;
+            case 5:
+                setup_cornell_box_with_3_spheres();
+                break;
+            case 6:
+                setup_SaintPetersBasilica_box();
+                break;
+            case 7:
+                setup_PondNight_box();
+                break;
+            default:
+                break;
+        }
+    }
+
     void setup_single_sphere() {
         drawCaustics = false;
         addLight(Vec3(-5, 5, 5), LightType_Spherical, Vec3(1, 1, 1), 2.5f, 2.f);
@@ -356,7 +398,7 @@ public:
         light.quad.triangles.emplace_back(0, 1, 2);
         light.quad.triangles.emplace_back(0, 2, 3);
         light.quad.buildArrays();
-        lights.push_back(light);
+        lights.emplace_back(light);
 
         {
             // Back Wall
@@ -440,54 +482,49 @@ public:
     }
 
     void setup_cornell_box_with_texture(const std::string &textureName) {
+        squares.resize(squares.size() + 6);
         {
             // Back Wall
-            Square s;
+            Square &s = squares[squares.size() - 6];
             s.setQuad(Vec3(2., 2., -2.) * 4, Vec3(-2., 0., 0.), Vec3(0., -2., 0.), 4. * 4, 4. * 4);
             s.loadTexture("../img/" + textureName + "/negz.ppm");
             s.buildArrays();
             s.material.diffuse_material = Vec3(1.0, 1.0, 1.0);
-            squares.push_back(s);
         } {
             // Left Wall
-            Square s;
+            Square &s = squares[squares.size() - 5];
             s.setQuad(Vec3(-2., 2., -2.) * 4, Vec3(0., 0., 2.), Vec3(0., -2, 0.), 4. * 4, 4. * 4);
             s.loadTexture("../img/" + textureName + "/negx.ppm");
             s.material.diffuse_material = Vec3(1.0, 1.0, 1.0);
             s.buildArrays();
-            squares.push_back(s);
         } {
             // Right Wall
-            Square s;
+            Square &s = squares[squares.size() - 4];
             s.loadTexture("../img/" + textureName + "/posx.ppm");
             s.material.diffuse_material = Vec3(1.0, 1.0, 1.0);
             s.setQuad(Vec3(2., 2., 2.) * 4, Vec3(0., 0., -2.), Vec3(0., -2., 0.), 4. * 4, 4. * 4);
             s.buildArrays();
-            squares.push_back(s);
         } {
             // Floor
-            Square s;
+            Square &s = squares[squares.size() - 3];
             if (!textureName.empty()) s.loadTexture("../img/" + textureName + "/negy.ppm");
             s.setQuad(Vec3(-2., -2., 2.) * 4, Vec3(2., 0., 0.), Vec3(0., 0., -2.) , 4. * 4, 4. * 4);
             s.buildArrays();
             s.material.diffuse_material = Vec3(1.0, 1.0, 1.0);
-            squares.push_back(s);
         } {
             // Ceiling
-            Square s;
+            Square &s = squares[squares.size() - 2];
             if (!textureName.empty()) s.loadTexture("../img/" + textureName + "/posy.ppm");
             s.setQuad(Vec3(-2., 2., -2.) * 4, Vec3(2., 0., 0.), Vec3(0., 0., 2.), 4. * 4, 4. * 4);
             s.buildArrays();
             s.material.diffuse_material = Vec3(1.0, 1.0, 1.0);
-            squares.push_back(s);
         } {
             // Front Wall
-            Square s;
+            Square &s = squares[squares.size() - 1];
             if (!textureName.empty()) s.loadTexture("../img/" + textureName + "/posz.ppm");
             s.setQuad(Vec3(-2., 2., 2.) * 4, Vec3(2., 0., 0.), Vec3(0., -2., 0.), 4. * 4, 4. * 4);
             s.buildArrays();
             s.material.diffuse_material = Vec3(1.0, 1.0, 1.0);
-            squares.push_back(s);
         }
     }
 };

@@ -48,7 +48,7 @@ static int lastX = 0, lastY = 0, lastZoom = 0;
 static unsigned int FPS = 0;
 static bool fullScreen = false;
 
-std::vector<Scene> scenes;
+Scene scene;
 unsigned int selected_scene;
 
 std::vector<std::pair<Vec3, Vec3>> rays;
@@ -124,7 +124,7 @@ void init() {
 
 void draw() {
     glEnable(GL_LIGHTING);
-    scenes[selected_scene].draw();
+    scene.draw();
 
     // Draw rays for debugging
     glDisable(GL_LIGHTING);
@@ -230,7 +230,7 @@ void ray_trace_section(const int w, const int h, const unsigned int nsamples,
                     const float v = (static_cast<float>(y) + dist(rng)) / static_cast<float>(h);
 
                     screenSpaceToWorldSpaceRay(u, v, pos, dir);
-                    const Vec3 color = scenes[selected_scene].rayTrace(Ray(pos, dir), rng);
+                    const Vec3 color = scene.rayTrace(Ray(pos, dir), rng);
                     image[x + y * w] += color;
                 }
                 image[x + y * w] /= static_cast<float>(nsamples);
@@ -412,7 +412,9 @@ void keyboard(const unsigned char key, int _x, int _y) {
             ray_trace_from_camera(settings);
             break;
         case '+':
-            selected_scene = (selected_scene + 1) % scenes.size();
+            selected_scene = (selected_scene + 1) % 8;
+            scene.unload();
+            scene.loadScene(selected_scene);
             break;
         default:
             printUsage();
@@ -507,6 +509,8 @@ int main(int argc, char **argv) {
     glutInitDisplayMode(GLUT_RGBA | GLUT_DEPTH | GLUT_DOUBLE);
     glutInitWindowSize(settings.width, settings.height);
     window = glutCreateWindow("Raytracer");
+    selected_scene = 4;
+    scene.loadScene(selected_scene);
 
     init();
     glutIdleFunc(idle);
@@ -517,18 +521,7 @@ int main(int argc, char **argv) {
     glutMouseFunc(mouse);
     keyboard('?', 0, 0);
 
-
-    camera.move(0., 0., -3.1);
-    selected_scene = 4;
-    scenes.resize(8);
-    scenes[0].setup_single_sphere();
-    scenes[1].setup_multiple_spheres();
-    scenes[2].setup_single_square();
-    scenes[3].setup_cornell_box_with_2_spheres();
-    scenes[4].setup_cornell_box_mesh();
-    scenes[5].setup_cornell_box_with_3_spheres();
-    scenes[6].setup_SaintPetersBasilica_box();
-    scenes[7].setup_PondNight_box();
+    camera.move(0., 0., -3.1 + 0.01);
     glutMainLoop();
 
     return EXIT_SUCCESS;
