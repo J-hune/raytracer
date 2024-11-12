@@ -20,7 +20,7 @@ void PhotonKDTree::getElementsRecursive(const PhotonKDNode *node, std::vector<Ph
     getElementsRecursive(node->right.get(), elements);
 }
 
-PhotonKDNode *PhotonKDTree::buildPhotonBalancedTree(std::vector<Photon> &elements, const int start, const int end, const int depth) {
+std::unique_ptr<PhotonKDNode> PhotonKDTree::buildPhotonBalancedTree(std::vector<Photon> &elements, const int start, const int end, const int depth) {
     if (start >= end) return nullptr;
 
     int axis = depth % 3; // Determine axis to split on
@@ -38,10 +38,10 @@ PhotonKDNode *PhotonKDTree::buildPhotonBalancedTree(std::vector<Photon> &element
     auto node = std::make_unique<PhotonKDNode>(elements[mid]);
 
     // Recursively build left and right subtrees
-    node->left = std::unique_ptr<PhotonKDNode>(buildPhotonBalancedTree(elements, start, mid, depth + 1));
-    node->right = std::unique_ptr<PhotonKDNode>(buildPhotonBalancedTree(elements, mid + 1, end, depth + 1));
+    node->left = std::unique_ptr(buildPhotonBalancedTree(elements, start, mid, depth + 1));
+    node->right = std::unique_ptr(buildPhotonBalancedTree(elements, mid + 1, end, depth + 1));
 
-    return node.release();
+    return node;
 }
 
 std::vector<Photon> PhotonKDTree::findNearestNeighbors(const Vec3 &point, const Vec3 &normal, const float maxDistance, const int maxCount) const {

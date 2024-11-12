@@ -52,7 +52,14 @@ class PhotonKDTree {
 public:
     PhotonKDTree() = default;
     explicit PhotonKDTree(std::vector<Photon>& elements) {
-        root = std::unique_ptr<PhotonKDNode>(buildPhotonBalancedTree(elements, 0, static_cast<int>(elements.size()), 0));
+        root = std::unique_ptr(buildPhotonBalancedTree(elements, 0, static_cast<int>(elements.size()), 0));
+    }
+
+    /**
+     * Clears the KD tree.
+     */
+    void clear() {
+        root.reset();
     }
 
     /**
@@ -91,12 +98,12 @@ private:
     /**
      * Builds a balanced KD tree from a vector of photons.
      * @param elements Vector of photons to build the tree from.
-     * @param start Start index of the current segment.
-     * @param end End index of the current segment.
+     * @param start Start index of the vector.
+     * @param end End index of the vector.
      * @param depth Current depth of the tree.
-     * @return Pointer to the root node of the built KD tree.
+     * @return Unique pointer to the root node of the KD tree.
      */
-    static PhotonKDNode *buildPhotonBalancedTree(std::vector<Photon> &elements, int start, int end, int depth);
+    static std::unique_ptr<PhotonKDNode>buildPhotonBalancedTree(std::vector<Photon> &elements, int start, int end, int depth);
 
     /**
      * Recursively finds the nearest neighbors of a given point within a specified maximum distance.

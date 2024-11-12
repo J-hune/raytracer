@@ -38,7 +38,14 @@ class MeshKDTree {
 public:
     MeshKDTree() = default;
     explicit MeshKDTree(const std::vector<Mesh>& elements) {
-        root = std::unique_ptr<MeshKDNode>(buildBalancedTree(elements));
+        root = std::unique_ptr(buildBalancedTree(elements));
+    }
+
+    /**
+     * Clears the KD tree.
+     */
+    void clear() {
+        root.reset();
     }
 
     /**
@@ -80,9 +87,9 @@ private:
     /**
      * Builds a balanced KD tree from a vector of meshes.
      * @param elements Vector of meshes to build the tree from.
-     * @return Pointer to the root node of the built KD tree.
+     * @return Unique pointer to the root node of the tree.
      */
-    MeshKDNode *buildBalancedTree(const std::vector<Mesh> &elements);
+    std::unique_ptr<MeshKDNode>buildBalancedTree(const std::vector<Mesh> &elements);
 
     /**
      * Recursively builds a balanced KD tree.
