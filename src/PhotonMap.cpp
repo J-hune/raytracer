@@ -168,21 +168,19 @@ void PhotonMap::processDiffusePhoton(
 
     if (xi < Pd) { // Diffuse reflection ξ ∈[0, Pd]
         photon.direction = randomDirection(rng, intersection.normal);
-        photon.color = Vec3::compProduct(photon.color, intersection.material.diffuse_material) / Pd;
+        photon.color /= Pd;
         if (photonType == 1) absorbed = true; // When caustics, if the photon is diffusely reflected, it is absorbed
-
         if (bounces > 0 && (photonType == 0 || photonType == 1)) {
             localPhotons.emplace_back(photon);
         }
+        photon.color = Vec3::compProduct(photon.color, intersection.material.diffuse_material);
     } else if (xi < Pd + Ps) {
         // Specular reflection ξ ∈]Pd, Ps + Pd]
         photon.direction = Lighting::computeReflectedDirection(photon.direction, intersection.normal).normalize();
         photon.color = Vec3::compProduct(photon.color, intersection.material.specular_material) / Pr;
 
     } else { // Absorption ξ ∈]Ps + Pd, 1]
-        photon.color = Vec3::compProduct(photon.color, intersection.material.diffuse_material);
         absorbed = true;
-
         if (bounces > 0 && (photonType == 0 || photonType == 1)) {
             localPhotons.emplace_back(photon);
         }
@@ -215,7 +213,7 @@ Vec3 PhotonMap::computeIndirectIllumination(const RaySceneIntersection &intersec
             const float distanceSq = (photon.position - intersection.intersection).squareLength();
             const float wpg = alpha *
                 (1.0f - (1.0f - std::exp(-beta * (distanceSq / (2 * settings.maxIndirectDistance * settings.maxIndirectDistance))) / maxBetaExp));
-            indirectIllumination += photon.color * wpg;
+            indirectIllumination += wpg * Vec3::compProduct(photon.color, intersection.material.diffuse_material);
         }
 
         illumination += indirectIllumination / static_cast<float>(settings.photonCountForIndirectColorEstimation);
@@ -233,7 +231,7 @@ Vec3 PhotonMap::computeIndirectIllumination(const RaySceneIntersection &intersec
             const float distanceSq = (photon.position - intersection.intersection).squareLength();
             const float wpg = alpha *
                 (1.0f - (1.0f - std::exp(-beta * (distanceSq / (2 * settings.maxCausticsDistance * settings.maxCausticsDistance))) / maxBetaExp));
-            causticsIllumination += wpg * photon.color;
+            causticsIllumination += wpg * Vec3::compProduct(photon.color, intersection.material.diffuse_material);
         }
 
         illumination += causticsIllumination / static_cast<float>(settings.photonCountForCausticsColorEstimation);
