@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.11)
 project(raytracer)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -20,3 +20,6 @@ add_executable(raytracer ${SOURCES} ${HEADERS})
 
 include_directories(${OPENGL_INCLUDE_DIRS} ${GLUT_INCLUDE_DIRS})
 target_link_libraries(raytracer ${OPENGL_LIBRARIES} ${GLUT_LIBRARIES})
+
+# Create renders directory
+file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/renders)
