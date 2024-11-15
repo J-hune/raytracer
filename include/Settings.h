@@ -42,12 +42,12 @@ public:
     mutable int height = 480;                           ///< Height of the window in pixels.
     mutable int samples = 100;                          ///< Number of samples per pixel for antialiasing to reduce noise.
     mutable int shadowRays = 16;                        ///< Number of rays used to calculate shadows for soft shadow effects.
-    int globalPhotons = 20000;                          ///< Number of photons to emit for global illumination.
-    int causticsPhotons = 20000;                        ///< Number of photons to emit for caustics effects.
-    float maxIndirectDistance = 1.5f;                   ///< Maximum distance to consider for global illumination.
-    float maxCausticsDistance = 0.1f;                   ///< Maximum distance to consider for caustics effects.
-    int photonCountForIndirectColorEstimation = 1000;   ///< Number of photons to use for color estimation.
-    int photonCountForCausticsColorEstimation = 100;    ///< Number of photons to use for color estimation.
+    mutable int globalPhotons = 20000;                          ///< Number of photons to emit for global illumination.
+    mutable int causticsPhotons = 20000;                        ///< Number of photons to emit for caustics effects.
+    mutable float maxIndirectDistance = 1.5f;                   ///< Maximum distance to consider for global illumination.
+    mutable float maxCausticsDistance = 0.1f;                   ///< Maximum distance to consider for caustics effects.
+    mutable int photonCountForIndirectColorEstimation = 1000;   ///< Number of photons to use for color estimation.
+    mutable int photonCountForCausticsColorEstimation = 100;    ///< Number of photons to use for color estimation.
     bool directIllumination = true;                     ///< Enable or disable direct illumination
     bool indirectIllumination = true;                   ///< Enable or disable indirect illumination using photon mapping.
     bool caustics = true;                               ///< Enable or disable caustics effects using photon mapping.
@@ -57,7 +57,7 @@ public:
     mutable bool drawDebugAABBs = false;                ///< If true, draw the Axis-Aligned Bounding Boxes (AABBs) of the meshes for debugging.
     bool useKDTree = true;                              ///< Use KD tree for mesh intersection to improve performance, otherwise use a vector (slower).
     int maxKdTreeDepth = 20;                            ///< Maximum depth of the KD tree for mesh intersection.
-    TypeOfFloor floorType = CHECKERBOARD;               ///< Type of floor pattern, either CHECKERBOARD or PLAIN.
+    mutable TypeOfFloor floorType = CHECKERBOARD;               ///< Type of floor pattern, either CHECKERBOARD or PLAIN.
 
 private:
     Settings() = default;

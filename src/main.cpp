@@ -72,8 +72,8 @@ void printUsage() {
         << "  ?   : Display help" << endl
         << "  w   : Toggle Wireframe Mode" << endl
         << "  f   : Toggle Full Screen Mode" << endl
-        << "  q   : Quick Render" << endl
         << "  r   : Render" << endl
+        << "  q   : Quick Render (with lower quality settings)" << endl
         << "  +   : Switch Scene" << endl
         << "  p   : Draw Debug Photons (8 modes you can cycle through)" << endl
         << "  a   : Draw Debug Axis-Aligned Bounding Boxes (AABBs)" << endl
@@ -242,12 +242,7 @@ void ray_trace_section(const int w, const int h, const unsigned int nsamples,
             if (progress % 2 == 0 && progress > lastPrintedProgress) {
                 std::lock_guard lock(progressMutex);
 
-                // Remove the previous progress bar
-                for (int i = 0; i < 100; i++) {
-                    std::cout << "\b";
-                }
-
-                std::cout << "Thread " << oss.str() << " processed row " << task.startY << " - " << task.endY << " (" << progress << "%)" << std::endl;
+                std::cout << "\rThread " << oss.str() << " processed row " << task.startY << " - " << task.endY << " (" << progress << "%)        " << std::endl;
                 if (progress > lastPrintedProgress) {
                     lastPrintedProgress = progress;
                     printProgressBar(progress);
@@ -484,12 +479,6 @@ int main(int argc, char **argv) {
     settings.height = 480;
     settings.samples = 80;
     settings.shadowRays = 32;
-    settings.globalPhotons = 100000;
-    settings.causticsPhotons = 500000;
-    settings.maxIndirectDistance = 0.8f;
-    settings.maxCausticsDistance = 0.1f;
-    settings.photonCountForIndirectColorEstimation = 2000;
-    settings.photonCountForCausticsColorEstimation = 1500;
     settings.directIllumination = true;
     settings.indirectIllumination = true;
     settings.caustics = true;
@@ -499,7 +488,6 @@ int main(int argc, char **argv) {
     settings.drawDebugAABBs = false;
     settings.useKDTree = true;
     settings.maxKdTreeDepth = 12;
-    settings.floorType = PLAIN; //PLAIN, CHECKERBOARD (checkerboard is a lot slower)
 
     if (argc > 2) {
         printUsage();
@@ -509,7 +497,7 @@ int main(int argc, char **argv) {
     glutInitDisplayMode(GLUT_RGBA | GLUT_DEPTH | GLUT_DOUBLE);
     glutInitWindowSize(settings.width, settings.height);
     window = glutCreateWindow("Raytracer");
-    selected_scene = 4;
+    selected_scene = 3;
     scene.loadScene(selected_scene);
 
     init();
