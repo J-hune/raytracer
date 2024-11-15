@@ -240,10 +240,10 @@ public:
                 setup_single_square();
                 break;
             case 3:
-                setup_cornell_box_with_2_spheres();
+                setup_cornell_box_mesh();
                 break;
             case 4:
-                setup_cornell_box_mesh();
+                setup_cornell_box_with_2_spheres();
                 break;
             case 5:
                 setup_cornell_box_with_3_spheres();
@@ -298,12 +298,30 @@ public:
     }
 
     void setup_cornell_box_with_2_spheres() {
+        const Settings &settings = Settings::getInstance();
+        settings.globalPhotons = 50000;
+        settings.causticsPhotons = 500000;
+        settings.maxIndirectDistance = 1.f;
+        settings.maxCausticsDistance = 0.07f;
+        settings.photonCountForIndirectColorEstimation = 1000;
+        settings.photonCountForCausticsColorEstimation = 200000;
+        settings.floorType = CHECKERBOARD;
+
         setup_cornell_box();
         addSphere(Vec3(1.0, -1.25, 0.5), 0.75f, Material_Glass, Vec3(0.f), Vec3(1.f), 16, 1.0, 1.5);
         addSphere(Vec3(-1.0, -1.25, -0.5), 0.75f, Material_Mirror, Vec3(0.f), Vec3(1.f), 16);
     }
 
     void setup_cornell_box_with_3_spheres() {
+        const Settings &settings = Settings::getInstance();
+        settings.globalPhotons = 50000;
+        settings.causticsPhotons = 500000;
+        settings.maxIndirectDistance = 1.f;
+        settings.maxCausticsDistance = 0.1f;
+        settings.photonCountForIndirectColorEstimation = 1000;
+        settings.photonCountForCausticsColorEstimation = 150000;
+        settings.floorType = CHECKERBOARD;
+
         setup_cornell_box();
         addSphere(Vec3(0.5, -1.49, 0.8), 0.5f, Material_Glass, Vec3(0.f), Vec3(1.f), 16, 1.0, 1.5);
         addSphere(Vec3(-1.0, -1.24, -0.5), 0.75f, Material_Mirror, Vec3(0.f), Vec3(1.f), 16);
@@ -312,6 +330,14 @@ public:
 
     void setup_cornell_box_mesh() {
         const Settings &settings = Settings::getInstance();
+        settings.globalPhotons = 50000;
+        settings.causticsPhotons = 200000;
+        settings.maxIndirectDistance = 1.f;
+        settings.maxCausticsDistance = 0.1f;
+        settings.photonCountForIndirectColorEstimation = 1000;
+        settings.photonCountForCausticsColorEstimation = 30000;
+        settings.floorType = PLAIN;
+
         setup_cornell_box();
         addMesh("../data/epcot.off", Vec3(0.0, -0.4, 0.0), Vec3(1.f),
             Material_Mirror, Vec3(0.f), Vec3(1.f), 16, 0.0, 1.5);
@@ -447,7 +473,7 @@ public:
                         );
                         s.buildArrays();
                         s.material.diffuse_material = ((i + j) % 2 == 0) ? color1 : color2;
-                        s.material.specular_material = s.material.diffuse_material * 0.8f;
+                        s.material.specular_material = s.material.diffuse_material * 0.2f;
                         s.material.shininess = 64;
                     }
                 }

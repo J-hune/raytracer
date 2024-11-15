@@ -195,45 +195,43 @@ void PhotonMap::processDiffusePhoton(
 Vec3 PhotonMap::computeIndirectIllumination(const RaySceneIntersection &intersection, const Settings &settings) const {
     Vec3 illumination(0.0f);
 
-    // Constants for gaussian filter
-    constexpr float alpha = 0.918f;
-    constexpr float beta = 1.953f;
-    const float maxBetaExp = 1.0f - std::exp(-beta);
-
     // Add global photons if enabled
     if (settings.indirectIllumination) {
+        constexpr float k = 1;
         std::vector<Photon> nearbyGlobalPhotons = globalPhotonTree.findNearestNeighbors(
                 intersection.intersection, intersection.normal, settings.maxIndirectDistance, settings.photonCountForIndirectColorEstimation
         );
 
         Vec3 indirectIllumination(0.0f);
         for (const Photon &photon : nearbyGlobalPhotons) {
-
-            // Apply a Gaussian filter to the photon contribution
+            // Apply a Cone Filter to the photons
             const float distanceSq = (photon.position - intersection.intersection).squareLength();
-            const float wpg = alpha *
-                (1.0f - (1.0f - std::exp(-beta * (distanceSq / (2 * settings.maxIndirectDistance * settings.maxIndirectDistance))) / maxBetaExp));
-            indirectIllumination += wpg * Vec3::compProduct(photon.color, intersection.material.diffuse_material);
+            const float dp = std::sqrt(distanceSq);
+            const float wpc = 1.0f - dp / (k * settings.maxIndirectDistance);
+            indirectIllumination += wpc * Vec3::compProduct(photon.color, intersection.material.diffuse_material);
         }
 
+        indirectIllumination /= ((1.0f - 2.0f / (3.0f * k)) * M_PIf * settings.maxIndirectDistance * settings.maxIndirectDistance);
         illumination += indirectIllumination / static_cast<float>(settings.photonCountForIndirectColorEstimation);
     }
 
     // Add caustics photons if enabled
     if (settings.caustics) {
+        constexpr float k = 1.5;
         std::vector<Photon> nearbyCausticsPhotons = causticsPhotonTree.findNearestNeighbors(
             intersection.intersection, intersection.normal, settings.maxCausticsDistance, settings.photonCountForCausticsColorEstimation
         );
         Vec3 causticsIllumination(0.0f);
         for (const Photon &photon : nearbyCausticsPhotons) {
 
-            // Apply a Gaussian filter to the photon contribution
+            // Apply a Cone Filter to the photons
             const float distanceSq = (photon.position - intersection.intersection).squareLength();
-            const float wpg = alpha *
-                (1.0f - (1.0f - std::exp(-beta * (distanceSq / (2 * settings.maxCausticsDistance * settings.maxCausticsDistance))) / maxBetaExp));
-            causticsIllumination += wpg * Vec3::compProduct(photon.color, intersection.material.diffuse_material);
+            const float dp = std::sqrt(distanceSq);
+            const float wpc = 1.0f - dp / (k * settings.maxCausticsDistance);
+            causticsIllumination += wpc * Vec3::compProduct(photon.color, intersection.material.diffuse_material);
         }
 
+        causticsIllumination /= ((1.0f - 2.0f / (3.0f * k)) * M_PIf * settings.maxCausticsDistance * settings.maxCausticsDistance);
         illumination += causticsIllumination / static_cast<float>(settings.photonCountForCausticsColorEstimation);
     }
 
