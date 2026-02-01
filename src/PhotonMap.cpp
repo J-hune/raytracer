@@ -179,17 +179,20 @@ void PhotonMap::processGlassPhoton(Photon& photon, const Vec3& normal, const Mat
     Photon reflectedPhoton = photon;
     reflectedPhoton.direction = reflectedDirection;
     reflectedPhoton.color = fresnelEffect * Vec3::compProduct(photon.color, material.specular_material);
+    reflectedPhoton.hasSpecularBounce = true;
     photons.emplace_back(reflectedPhoton);
 
     // Add object color to the photon color (with transparency)
     photon.direction = refractedDirection;
     photon.color = (1 - fresnelEffect) * (material.transparency * photon.color + (1 - material.transparency) * material.specular_material);
+    photon.hasSpecularBounce = true;
 }
 
 void PhotonMap::processMirrorPhoton(Photon& photon, const Vec3& normal, const Material& material) {
     // Change the direction of the photon to make it bounce, keep the color at 90% to simulate reflection
     photon.direction = Lighting::computeReflectedDirection(photon.direction, normal).normalize();
     photon.color = Vec3::compProduct(photon.color, material.specular_material);
+    photon.hasSpecularBounce = true;
 }
 
 void PhotonMap::processDiffusePhoton(
@@ -204,12 +207,17 @@ void PhotonMap::processDiffusePhoton(
     // Pd, the absorbing one without. Two identical photons therefore stored energies differing by a
     // factor 1/Pd depending on a coin flip. The compensation belongs to the continuing path, not to the
     // deposit.
-    if (bounces > 0) {
+    //
+    // The global map takes every diffuse deposit after the first bounce. The caustics map only takes
+    // photons that reached this surface through a mirror or a transparent object, that is an L(S|D)*S+D
+    // path. Without that condition purely diffuse paths ended up in the caustics map, where they add a
+    // low-frequency haze that a small gather radius cannot resolve.
+    if (bounces > 0 && (photonType == 0 || photon.hasSpecularBounce)) {
         localPhotons.emplace_back(photon);
     }
 
-    // A caustics photon stops at the first diffuse surface: only the light concentrated by a specular
-    // or refractive element on its way is of interest here.
+    // A caustics photon stops at the first diffuse surface: what follows is diffuse interreflection,
+    // which belongs to the global map.
     if (photonType == 1) {
         absorbed = true;
         return;
