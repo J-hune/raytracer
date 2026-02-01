@@ -1,8 +1,11 @@
 #include "../include/PhotonMap.h"
 #include "../include/Intersection.h"
 #include "../include/Lighting.h"
+#include <algorithm>
 #include <cmath>
+#include <numeric>
 #include <thread>
+#include <vector>
 #include <GL/gl.h>
 
 /******************************************************************************************************************/
@@ -29,25 +32,38 @@ PhotonKDTree PhotonMap::emitPhotonsWithType(
     const std::vector<Mesh>& meshes, const MeshKDTree& kdTree, const int photonCount, int photonType)
 {
     std::vector<Photon> photons;
-    std::vector<Photon> photonsToEmit;
     std::mutex photonMutex;
 
-    const int numThreads = static_cast<int>(std::thread::hardware_concurrency());
-    int photonsPerThread = photonCount / numThreads;
-    int emittedPhotons = 0;
+    const int numThreads = std::max(1, static_cast<int>(std::thread::hardware_concurrency()));
+    const int photonsPerThread = std::max(1, photonCount / numThreads);
 
-    auto emitTask = [this, &lights, &spheres, &squares, &meshes, &kdTree, &photonMutex, &photons, photonsPerThread, photonType, &emittedPhotons] {
-        emittedPhotons = emitPhotonsForThread(
-            photonsPerThread, photonType, lights, spheres, squares, meshes, kdTree, photonMutex, photons);
-    };
+    // One counter slot per thread. A single shared counter written by every thread would be a data race,
+    // and the total is needed below to normalise the photon energy.
+    std::vector<int> emittedPerThread(static_cast<size_t>(numThreads), 0);
 
-    std::vector<std::thread> threads(numThreads);
-    for (auto& thread : threads) {
-        thread = std::thread(emitTask);
+    std::vector<std::thread> threads;
+    threads.reserve(static_cast<size_t>(numThreads));
+    for (int i = 0; i < numThreads; ++i) {
+        threads.emplace_back([this, i, &emittedPerThread, photonsPerThread, photonType,
+                              &lights, &spheres, &squares, &meshes, &kdTree, &photonMutex, &photons] {
+            emittedPerThread[static_cast<size_t>(i)] = emitPhotonsForThread(
+                photonsPerThread, photonType, lights, spheres, squares, meshes, kdTree, photonMutex, photons);
+        });
     }
 
     for (auto& thread : threads) {
         thread.join();
+    }
+
+    // A stored photon must carry the light power divided by the number of photons actually emitted.
+    // Without this normalisation the illumination scales with the photon count, so emitting more
+    // photons brightens the image instead of reducing its noise.
+    const int totalEmitted = std::accumulate(emittedPerThread.begin(), emittedPerThread.end(), 0);
+    if (totalEmitted > 0) {
+        const auto emittedCount = static_cast<float>(totalEmitted);
+        for (Photon& photon : photons) {
+            photon.color /= emittedCount;
+        }
     }
 
     return PhotonKDTree(photons);
@@ -68,15 +84,33 @@ int PhotonMap::emitPhotonsForThread(
     std::vector<Photon> localPhotons;
     std::vector<Photon> localPhotonsToEmit;
     std::vector<Photon> localInitialPhotons;
-    localPhotonsToEmit.reserve(photonCount * 2);
+    localPhotonsToEmit.reserve(64);
+
+    // Guard against a pathological chain of specular splits. Energy decay already bounds the depth,
+    // this only keeps a degenerate scene from growing the queue without limit.
+    constexpr size_t maxQueuedSecondaries = 4096;
 
     int emittedPhotons = 0;
-    while (localPhotons.size() < static_cast<size_t>(photonCount)) {
+    // Loop on the number of photons *emitted*, not on the number stored. The energy of each photon is
+    // normalised by the emitted count, so that is the quantity that has to be controlled here.
+    while (emittedPhotons < photonCount) {
         Photon photon = photonType == 0 ? createInitialPhoton(lights, rng) : createInitialPhotonTowardsObjects(lights, rng, spheres, meshes);
-        localPhotonsToEmit.emplace_back(photon);
         localInitialPhotons.emplace_back(photon);
         emittedPhotons++;
         processPhotonPath(photon, spheres, squares, meshes, kdTree, dist, rng, localPhotonsToEmit, localPhotons, photonType);
+
+        // Trace the secondary photons produced by specular splitting, i.e. the Fresnel-reflected half
+        // of a glass interaction. This queue used to be filled and never read, so the reflected part of
+        // every glass hit was silently discarded and glass contributed refraction only.
+        while (!localPhotonsToEmit.empty()) {
+            if (localPhotonsToEmit.size() > maxQueuedSecondaries) {
+                localPhotonsToEmit.clear();
+                break;
+            }
+            Photon secondary = localPhotonsToEmit.back();
+            localPhotonsToEmit.pop_back();
+            processPhotonPath(secondary, spheres, squares, meshes, kdTree, dist, rng, localPhotonsToEmit, localPhotons, photonType);
+        }
     }
 
     std::lock_guard lock(photonMutex);
@@ -164,26 +198,35 @@ void PhotonMap::processDiffusePhoton(
 {
     float Pr, Pd, Ps;
     computeReflectionProbabilities(intersection.material, Pr, Pd, Ps);
+
+    // Deposit the power that actually reaches the surface, before any Russian roulette compensation.
+    // The two storing branches used to deposit different quantities: the diffuse one after dividing by
+    // Pd, the absorbing one without. Two identical photons therefore stored energies differing by a
+    // factor 1/Pd depending on a coin flip. The compensation belongs to the continuing path, not to the
+    // deposit.
+    if (bounces > 0) {
+        localPhotons.emplace_back(photon);
+    }
+
+    // A caustics photon stops at the first diffuse surface: only the light concentrated by a specular
+    // or refractive element on its way is of interest here.
+    if (photonType == 1) {
+        absorbed = true;
+        return;
+    }
+
     const float xi = dist(rng);
 
-    if (xi < Pd) { // Diffuse reflection ξ ∈[0, Pd]
+    if (xi < Pd) { // Diffuse reflection ξ ∈ [0, Pd]
         photon.direction = randomDirection(rng, intersection.normal);
-        photon.color /= Pd;
-        if (photonType == 1) absorbed = true; // When caustics, if the photon is diffusely reflected, it is absorbed
-        if (bounces > 0 && (photonType == 0 || photonType == 1)) {
-            localPhotons.emplace_back(photon);
-        }
-        photon.color = Vec3::compProduct(photon.color, intersection.material.diffuse_material);
-    } else if (xi < Pd + Ps) {
-        // Specular reflection ξ ∈]Pd, Ps + Pd]
+        photon.color = Vec3::compProduct(photon.color, intersection.material.diffuse_material) / Pd;
+    } else if (xi < Pd + Ps) { // Specular reflection ξ ∈ ]Pd, Pd + Ps]
+        // Compensate by the probability of the event actually drawn (Ps), not by the total reflection
+        // probability Pr = Pd + Ps, which is larger and therefore drained energy from every specular path.
         photon.direction = Lighting::computeReflectedDirection(photon.direction, intersection.normal).normalize();
-        photon.color = Vec3::compProduct(photon.color, intersection.material.specular_material) / Pr;
-
-    } else { // Absorption ξ ∈]Ps + Pd, 1]
+        photon.color = Vec3::compProduct(photon.color, intersection.material.specular_material) / Ps;
+    } else { // Absorption ξ ∈ ]Pd + Ps, 1]
         absorbed = true;
-        if (bounces > 0 && (photonType == 0 || photonType == 1)) {
-            localPhotons.emplace_back(photon);
-        }
     }
 }
 
@@ -192,47 +235,75 @@ void PhotonMap::processDiffusePhoton(
 /******************************************** RENDERING PHOTON PATHS **********************************************/
 /******************************************************************************************************************/
 
+namespace {
+    /**
+     * @brief Cone-filtered density estimate over a set of gathered photons.
+     *
+     * Two corrections with respect to a naive estimate:
+     *
+     * - The normalisation uses the distance to the farthest photon actually gathered, not the configured
+     *   maximum radius. In a sparse region the search returns far fewer photons than requested, and
+     *   dividing by the full disc area would darken that region for no physical reason. This is what
+     *   produced blotches and dark corners.
+     * - It does not divide by the number of photons gathered. Dividing the sum of powers by the disc area
+     *   is already what turns a flux into a density; dividing a second time turns it into a mean per
+     *   photon, which is dimensionally wrong and makes the luminance depend on a quality setting.
+     *
+     * @param photons The photons gathered around the shading point.
+     * @param point The point being shaded.
+     * @param albedo The diffuse albedo of the surface at that point.
+     * @param k Cone filter constant.
+     * @param maxRadius Upper bound on the gather radius, from the settings.
+     * @return The estimated indirect radiance.
+     */
+    Vec3 coneFilteredEstimate(const std::vector<Photon> &photons, const Vec3 &point, const Vec3 &albedo,
+                              const float k, const float maxRadius) {
+        if (photons.empty()) return {0.0f, 0.0f, 0.0f};
+
+        // Effective radius: the distance to the farthest photon retained by the search.
+        float radiusSq = 0.0f;
+        for (const Photon &photon: photons) {
+            radiusSq = std::max(radiusSq, (photon.position - point).squareLength());
+        }
+        const float radius = std::min(std::sqrt(radiusSq), maxRadius);
+        if (radius <= 1e-6f) return {0.0f, 0.0f, 0.0f};
+
+        Vec3 sum(0.0f, 0.0f, 0.0f);
+        for (const Photon &photon: photons) {
+            const float dp = (photon.position - point).length();
+            const float wpc = 1.0f - dp / (k * radius);
+            if (wpc <= 0.0f) continue;
+            sum += wpc * Vec3::compProduct(photon.color, albedo);
+        }
+
+        sum /= (1.0f - 2.0f / (3.0f * k)) * M_PIf * radius * radius;
+        return sum;
+    }
+}
+
 Vec3 PhotonMap::computeIndirectIllumination(const RaySceneIntersection &intersection, const Settings &settings) const {
     Vec3 illumination(0.0f);
 
     // Add global photons if enabled
     if (settings.indirectIllumination) {
         constexpr float k = 1;
-        std::vector<Photon> nearbyGlobalPhotons = globalPhotonTree.findNearestNeighbors(
+        const std::vector<Photon> nearbyGlobalPhotons = globalPhotonTree.findNearestNeighbors(
                 intersection.intersection, intersection.normal, settings.maxIndirectDistance, settings.photonCountForIndirectColorEstimation
         );
 
-        Vec3 indirectIllumination(0.0f);
-        for (const Photon &photon : nearbyGlobalPhotons) {
-            // Apply a Cone Filter to the photons
-            const float distanceSq = (photon.position - intersection.intersection).squareLength();
-            const float dp = std::sqrt(distanceSq);
-            const float wpc = 1.0f - dp / (k * settings.maxIndirectDistance);
-            indirectIllumination += wpc * Vec3::compProduct(photon.color, intersection.material.diffuse_material);
-        }
-
-        indirectIllumination /= ((1.0f - 2.0f / (3.0f * k)) * M_PIf * settings.maxIndirectDistance * settings.maxIndirectDistance);
-        illumination += indirectIllumination / static_cast<float>(settings.photonCountForIndirectColorEstimation);
+        illumination += coneFilteredEstimate(nearbyGlobalPhotons, intersection.intersection,
+                                             intersection.material.diffuse_material, k, settings.maxIndirectDistance);
     }
 
     // Add caustics photons if enabled
     if (settings.caustics) {
         constexpr float k = 1.5;
-        std::vector<Photon> nearbyCausticsPhotons = causticsPhotonTree.findNearestNeighbors(
+        const std::vector<Photon> nearbyCausticsPhotons = causticsPhotonTree.findNearestNeighbors(
             intersection.intersection, intersection.normal, settings.maxCausticsDistance, settings.photonCountForCausticsColorEstimation
         );
-        Vec3 causticsIllumination(0.0f);
-        for (const Photon &photon : nearbyCausticsPhotons) {
 
-            // Apply a Cone Filter to the photons
-            const float distanceSq = (photon.position - intersection.intersection).squareLength();
-            const float dp = std::sqrt(distanceSq);
-            const float wpc = 1.0f - dp / (k * settings.maxCausticsDistance);
-            causticsIllumination += wpc * Vec3::compProduct(photon.color, intersection.material.diffuse_material);
-        }
-
-        causticsIllumination /= ((1.0f - 2.0f / (3.0f * k)) * M_PIf * settings.maxCausticsDistance * settings.maxCausticsDistance);
-        illumination += causticsIllumination / static_cast<float>(settings.photonCountForCausticsColorEstimation);
+        illumination += coneFilteredEstimate(nearbyCausticsPhotons, intersection.intersection,
+                                             intersection.material.diffuse_material, k, settings.maxCausticsDistance);
     }
 
     return illumination;

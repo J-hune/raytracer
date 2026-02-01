@@ -75,8 +75,13 @@ void PhotonKDTree::findNearestNeighborsRecursive(
     // Calculate the distance to the plane defined by the normal
     const float distToPlane = Vec3::dot(toPhoton, normal);
 
-    // Check if the photon is within the disk region (both distance to center and distance to the plane)
-    if (distSqToCenter < maxDistSq && distToPlane < 1e-5f) {
+    // Check if the photon is within the disk region (both distance to center and distance to the plane).
+    // The plane test must be two-sided: a signed comparison would accept every photon located *behind*
+    // the surface (negative projection), which lets light bleed through thin geometry.
+    // The tolerance is proportional to the search radius so that curved surfaces still gather photons.
+    constexpr float planeToleranceRatio = 0.1f;
+    if (distSqToCenter < maxDistSq
+        && distToPlane * distToPlane < planeToleranceRatio * planeToleranceRatio * maxDistSq) {
         // Add photon to the results if it's within the allowed distance
         if (static_cast<int>(nearestElements.size()) < maxCount) {
             nearestElements.emplace(distSqToCenter, node->data);
