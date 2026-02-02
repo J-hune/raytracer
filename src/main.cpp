@@ -489,15 +489,42 @@ int main(int argc, char **argv) {
     settings.useKDTree = true;
     settings.maxKdTreeDepth = 12;
 
-    if (argc > 2) {
-        printUsage();
-        exit(EXIT_FAILURE);
+    // Offline rendering options. They are parsed before GLUT so that a batch of images can be produced
+    // from a script, without touching the interactive controls. Unrecognised arguments are forwarded to
+    // GLUT, which keeps its own switches usable.
+    bool offlineRender = false;
+    int startScene = 3;
+    std::vector<char *> glutArgv;
+    glutArgv.push_back(argv[0]);
+
+    auto intValue = [](const std::string &arg, const size_t prefixLength) {
+        return std::stoi(arg.substr(prefixLength));
+    };
+
+    for (int i = 1; i < argc; ++i) {
+        const std::string arg = argv[i];
+        if (arg == "--render") offlineRender = true;
+        else if (arg == "--help" || arg == "-h") { printUsage(); exit(EXIT_SUCCESS); }
+        else if (arg.rfind("--scene=", 0) == 0) startScene = intValue(arg, 8);
+        else if (arg.rfind("--width=", 0) == 0) settings.width = intValue(arg, 8);
+        else if (arg.rfind("--height=", 0) == 0) settings.height = intValue(arg, 9);
+        else if (arg.rfind("--samples=", 0) == 0) settings.samples = intValue(arg, 10);
+        else if (arg.rfind("--shadow-rays=", 0) == 0) settings.shadowRays = intValue(arg, 14);
+        else if (arg.rfind("--global-photons=", 0) == 0) settings.globalPhotons = intValue(arg, 17);
+        else if (arg.rfind("--caustics-photons=", 0) == 0) settings.causticsPhotons = intValue(arg, 19);
+        else if (arg.rfind("--indirect-gather=", 0) == 0) settings.photonCountForIndirectColorEstimation = intValue(arg, 18);
+        else if (arg.rfind("--caustics-gather=", 0) == 0) settings.photonCountForCausticsColorEstimation = intValue(arg, 18);
+        else if (arg.rfind("--indirect-radius=", 0) == 0) settings.maxIndirectDistance = std::stof(arg.substr(18));
+        else if (arg.rfind("--caustics-radius=", 0) == 0) settings.maxCausticsDistance = std::stof(arg.substr(18));
+        else glutArgv.push_back(argv[i]);
     }
-    glutInit(&argc, argv);
+
+    int glutArgc = static_cast<int>(glutArgv.size());
+    glutInit(&glutArgc, glutArgv.data());
     glutInitDisplayMode(GLUT_RGBA | GLUT_DEPTH | GLUT_DOUBLE);
     glutInitWindowSize(settings.width, settings.height);
     window = glutCreateWindow("Raytracer");
-    selected_scene = 3;
+    selected_scene = startScene;
     scene.loadScene(selected_scene);
 
     init();
@@ -510,6 +537,13 @@ int main(int argc, char **argv) {
     keyboard('?', 0, 0);
 
     camera.move(0., 0., -3.1 + 0.01);
+
+    // Offline mode: render once and leave, without entering the interactive loop.
+    if (offlineRender) {
+        ray_trace_from_camera(settings);
+        return EXIT_SUCCESS;
+    }
+
     glutMainLoop();
 
     return EXIT_SUCCESS;
