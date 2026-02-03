@@ -139,11 +139,15 @@ public:
 
     [[nodiscard]] Vec3 computeSphericalLight(const Vec3 &intersectionPoint, const Vec3 &normal, const Material &material, const Light &light, const Vec3 &viewDir) const {
         constexpr float epsilon = 1e-5f;
-        const Vec3 lightDir = (light.position - intersectionPoint).normalize();
-        const float lightDistance = lightDir.length();
+        // The distance has to be measured before normalising: normalize() mutates in place, so taking
+        // the length afterwards always returned 1 and every occluder further than one unit was ignored.
+        const Vec3 toLight = light.position - intersectionPoint;
+        const float lightDistance = toLight.length();
+        const Vec3 lightDir = toLight.normalized();
 
         // Ray to test the shadow
         const Ray shadowRay(intersectionPoint + normal * epsilon, lightDir);
+
         const RaySceneIntersection shadowIntersection = Intersection::computeIntersection(shadowRay, spheres, squares, meshes, kdTree, epsilon);
 
         // If the point is in shadow, skip the light
@@ -162,13 +166,18 @@ public:
         const Vec3 lightDir = (light.position - intersectionPoint).normalize();
 
         // Sampling for soft shadows
+        int samplesTaken = 0;
         for (int i = 0; i < settings.shadowRays; ++i) {
-            Vec3 samplePoint = Lighting::samplePointOnQuad(light, rng);
-            Vec3 shadowDir = (samplePoint - intersectionPoint).normalize();
-            const float shadowDistance = shadowDir.length();
+            const Vec3 samplePoint = Lighting::samplePointOnQuad(light, rng);
+            // Same as above: measure the distance before normalising, otherwise it is always 1.
+            const Vec3 toSample = samplePoint - intersectionPoint;
+            const float shadowDistance = toSample.length();
+            const Vec3 shadowDir = toSample.normalized();
+            ++samplesTaken;
 
             // Ray to test the shadow
             Ray shadowRay(intersectionPoint + normal * epsilon, shadowDir);
+
             const RaySceneIntersection shadowIntersection = Intersection::computeIntersection(shadowRay, spheres, squares, meshes, kdTree, epsilon);
 
             // If the point is in shadow, increment the shadow factor
@@ -178,7 +187,9 @@ public:
             }
         }
 
-        const float lightVisibility = 1.0f - shadowFactor / static_cast<float>(settings.shadowRays);
+        // Divide by the samples actually taken, not by the requested count: the early exit stops the loop
+        // short, and using the full count then reported a lighter shadow than the samples support.
+        const float lightVisibility = 1.0f - shadowFactor / static_cast<float>(std::max(1, samplesTaken));
         if (lightVisibility > 0.0f) {
             color += Lighting::computePhongComponents(lightDir, viewDir, normal, material, light) * lightVisibility;
         }

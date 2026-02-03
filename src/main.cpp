@@ -199,9 +199,15 @@ void export_partial_image(const std::vector<Vec3>& image, const int w, const int
 }
 
 void ray_trace_section(const int w, const int h, const unsigned int nsamples,
-    std::vector<Vec3> &image, std::mt19937 &rng, std::uniform_real_distribution<float> &dist, const int totalRows)
+    std::vector<Vec3> &image, const unsigned int threadSeed, const int totalRows)
 {
     Vec3 pos, dir;
+
+    // Each thread owns its generator. std::mt19937 is not thread safe: sharing one meant every thread
+    // mutated the same 2.5 KB of state on every sample, which is undefined behaviour and also kept that
+    // state bouncing between cores. The seed is derived per thread so the streams stay distinct.
+    std::mt19937 rng(threadSeed);
+    std::uniform_real_distribution<float> dist(0.0f, 1.0f);
 
     // Print the launch of ray tracing and thread ID
     std::ostringstream oss;
@@ -267,9 +273,8 @@ void ray_trace_from_camera(const Settings &settings) {
     auto start = std::chrono::high_resolution_clock::now();
     initializeMatrices();
 
-    // Random number generator for anti-aliasing
-    std::mt19937 rng(std::random_device{}());
-    std::uniform_real_distribution<float> dist(0.0f, 1.0f);
+    // Seed source for the per-thread generators.
+    std::random_device seedSource;
 
     // Number of threads to use
     const unsigned int numThreads = std::thread::hardware_concurrency();
@@ -287,7 +292,7 @@ void ray_trace_from_camera(const Settings &settings) {
 
     // Start the threads
     for (unsigned int i = 0; i < numThreads; ++i) {
-        threads.emplace_back(ray_trace_section, w, h, settings.samples, std::ref(image), std::ref(rng), std::ref(dist), totalRows);
+        threads.emplace_back(ray_trace_section, w, h, settings.samples, std::ref(image), seedSource(), totalRows);
     }
 
     // Wait for all threads to finish
