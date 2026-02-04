@@ -1,8 +1,34 @@
 #include "../include/Intersection.h"
 #include <cfloat>
+#include <cstdlib>
 
 #include "../include/MeshKDTree.h"
 #include "../include/Settings.h"
+
+bool Intersection::isOccluded(const Ray &ray, const std::vector<Sphere> &spheres,
+    const std::vector<Square> &squares, const MeshKDTree &kd_tree, const float maxDistance, const float epsilon) {
+    const Settings &settings = Settings::getInstance();
+
+    const auto blocks = [maxDistance, epsilon](const auto &hit) {
+        return hit.intersectionExists && hit.t > epsilon && hit.t < maxDistance;
+    };
+
+    for (const auto &sphere : spheres) {
+        if (!sphere.intersectAABB(ray)) continue;
+        if (blocks(sphere.intersect(ray))) return true;
+    }
+
+    for (const auto &square : squares) {
+        if (!square.intersectAABB(ray)) continue;
+        if (blocks(square.intersect(ray))) return true;
+    }
+
+    if (settings.useKDTree && !kd_tree.isEmpty() && kd_tree.isOccluded(ray, maxDistance, epsilon)) {
+        return true;
+    }
+
+    return false;
+}
 
 RaySceneIntersection Intersection::computeIntersection(const Ray &ray, const std::vector<Sphere> &spheres,
 const std::vector<Square> &squares, const std::vector<Mesh> &meshes, const MeshKDTree &kd_tree, const float z_near) {

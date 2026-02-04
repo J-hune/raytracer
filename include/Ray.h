@@ -46,22 +46,29 @@ public:
      * @param aabb The axis-aligned bounding box to check for intersection.
      * @return True if the ray intersects with the AABB, false otherwise.
      */
-    [[nodiscard]] bool intersectAABB(const AABB &aabb) const {
-        Vec3 invDir = Vec3(1.f) / direction();
-        Vec3 orig = origin();
+    [[nodiscard]] bool intersectAABB(const AABB &aabb, float &tMinOut, float &tMaxOut) const {
+        const Vec3 invDir = Vec3(1.f) / direction();
+        const Vec3 orig = origin();
 
         float tMin = -FLT_MAX;
         float tMax = FLT_MAX;
 
         for (int i = 0; i < 3; ++i) {
-            float t1 = (aabb.getMin()[i] - orig[i]) * invDir[i];
-            float t2 = (aabb.getMax()[i] - orig[i]) * invDir[i];
+            const float t1 = (aabb.getMin()[i] - orig[i]) * invDir[i];
+            const float t2 = (aabb.getMax()[i] - orig[i]) * invDir[i];
 
             tMin = std::max(tMin, std::min(t1, t2));
             tMax = std::min(tMax, std::max(t1, t2));
         }
 
+        tMinOut = tMin;
+        tMaxOut = tMax;
         return tMax >= tMin && tMax >= 0;
+    }
+
+    [[nodiscard]] bool intersectAABB(const AABB &aabb) const {
+        float tMin, tMax;
+        return intersectAABB(aabb, tMin, tMax);
     }
 };
 

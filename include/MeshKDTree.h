@@ -69,6 +69,17 @@ public:
     [[nodiscard]] bool intersect(const Ray &ray, RayTriangleIntersection &intersection) const;
 
     /**
+     * Any-hit query: reports whether a triangle blocks the segment between the ray origin and
+     * maxDistance, without looking for the closest one. A shadow ray can stop at the first blocker,
+     * where the nearest-hit query has to keep traversing the whole tree.
+     * @param ray The ray to test.
+     * @param maxDistance Distance beyond which a hit no longer blocks.
+     * @param epsilon Near cutoff.
+     * @return True as soon as one blocking triangle is found.
+     */
+    [[nodiscard]] bool isOccluded(const Ray &ray, float maxDistance, float epsilon) const;
+
+    /**
      * Draws the KD tree.
      */
     void draw();
@@ -109,6 +120,11 @@ private:
      * @return True if the ray intersects with any triangle, false otherwise.
      */
     bool traverseTree(const MeshKDNode *node, const Ray &ray, RayTriangleIntersection &intersection) const;
+
+    /**
+     * Recursively looks for any blocking triangle, short-circuiting on the first one found.
+     */
+    bool traverseOcclusion(const MeshKDNode *node, const Ray &ray, float maxDistance, float epsilon) const;
 
     /**
      * Recursively retrieves axis-aligned bounding boxes to draw.

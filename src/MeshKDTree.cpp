@@ -37,9 +37,16 @@ std::unique_ptr<MeshKDNode> MeshKDTree::buildBalancedTree(const std::vector<Mesh
 }
 
 std::unique_ptr<MeshKDNode> MeshKDTree::buildRecursiveBalancedTree(const std::vector<Triangle> &vector, const AABB &aabb, const int depth, int maxDepth) {
-    // Stop recursion if maximum depth is reached or no triangles left
-    if (depth >= maxDepth || vector.empty()) {
-        return nullptr;
+    if (vector.empty()) return nullptr;
+
+    // Bound the node by its own triangles rather than by the box handed down, which is tighter and
+    // therefore rejects more rays.
+    const AABB nodeAABB = Triangle::getAABB(vector);
+
+    // Below this size, splitting costs more in traversal than it saves in triangle tests.
+    constexpr size_t maxLeafTriangles = 8;
+    if (depth >= maxDepth || vector.size() <= maxLeafTriangles) {
+        return std::make_unique<MeshKDNode>(nodeAABB, vector);
     }
 
     const int axis = depth % 3; // Determine the axis to split on
@@ -51,26 +58,27 @@ std::unique_ptr<MeshKDNode> MeshKDTree::buildRecursiveBalancedTree(const std::ve
         const Vec3 &v2 = triangle.getVertex(2);
         const Vec3 min = Vec3::min(v0, Vec3::min(v1, v2));
 
-        if (min[axis] < aabb.center()[axis]) {
+        if (min[axis] < nodeAABB.center()[axis]) {
             leftTriangles.push_back(triangle);
         } else {
             rightTriangles.push_back(triangle);
         }
     }
 
-    // Calculate AABBs for left and right triangles
-    AABB leftAABB, rightAABB;
-    for (const auto &triangle : leftTriangles) {
-        leftAABB = AABB::merge(leftAABB, triangle.getAABB());
+    // Degenerate split: every triangle landed on the same side. Recursing would rebuild the identical
+    // set at every level down to maxDepth, producing a chain of nodes that partitions nothing while
+    // multiplying the work. Make a leaf instead.
+    if (leftTriangles.empty() || rightTriangles.empty()) {
+        return std::make_unique<MeshKDNode>(nodeAABB, vector);
     }
-    for (const auto &triangle : rightTriangles) {
-        rightAABB = AABB::merge(rightAABB, triangle.getAABB());
-    }
-    auto node = std::make_unique<MeshKDNode>(AABB::merge(leftAABB, rightAABB), vector);
+
+    // Only leaves carry triangles. Storing the full set in every internal node duplicated the mesh once
+    // per level, for triangles that are never tested since traversal only reads them at leaves.
+    auto node = std::make_unique<MeshKDNode>(nodeAABB, std::vector<Triangle>{});
 
     // Create child nodes
-    node->left = buildRecursiveBalancedTree(leftTriangles, leftAABB, depth + 1, maxDepth);
-    node->right = buildRecursiveBalancedTree(rightTriangles, rightAABB, depth + 1, maxDepth);
+    node->left = buildRecursiveBalancedTree(leftTriangles, nodeAABB, depth + 1, maxDepth);
+    node->right = buildRecursiveBalancedTree(rightTriangles, nodeAABB, depth + 1, maxDepth);
 
     return node;
 }
@@ -80,11 +88,44 @@ bool MeshKDTree::intersect(const Ray &ray, RayTriangleIntersection &intersection
     return traverseTree(root.get(), ray, intersection);
 }
 
+bool MeshKDTree::isOccluded(const Ray &ray, const float maxDistance, const float epsilon) const {
+    return traverseOcclusion(root.get(), ray, maxDistance, epsilon);
+}
+
+bool MeshKDTree::traverseOcclusion(const MeshKDNode *node, const Ray &ray, const float maxDistance, const float epsilon) const {
+    if (!node) return false;
+
+    float tMin, tMax;
+    if (!ray.intersectAABB(node->aabb, tMin, tMax)) return false;
+
+    // The box lies entirely past the light, or entirely behind the origin: it cannot block anything.
+    if (tMin > maxDistance || tMax < epsilon) return false;
+
+    if (node->left == nullptr && node->right == nullptr) {
+        for (const auto &triangle : node->triangles) {
+            const RayTriangleIntersection hit = triangle.intersect(ray);
+            // Any blocker is enough, there is no need to find the closest one.
+            if (hit.intersectionExists && hit.t > epsilon && hit.t < maxDistance) return true;
+        }
+        return false;
+    }
+
+    // The short-circuit is the point: as soon as one subtree reports a blocker, the other is skipped.
+    return traverseOcclusion(node->left.get(), ray, maxDistance, epsilon)
+        || traverseOcclusion(node->right.get(), ray, maxDistance, epsilon);
+}
+
 bool MeshKDTree::traverseTree(const MeshKDNode *node, const Ray &ray, RayTriangleIntersection &intersection) const {
     if (!node) return false;
 
     // Check if the ray intersects the AABB of this node
-    if (!ray.intersectAABB(node->aabb)) {
+    float tMin, tMax;
+    if (!ray.intersectAABB(node->aabb, tMin, tMax)) {
+        return false;
+    }
+
+    // The box starts beyond the closest hit found so far, so nothing inside it can improve on it.
+    if (tMin > intersection.t) {
         return false;
     }
 

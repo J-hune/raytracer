@@ -148,10 +148,8 @@ public:
         // Ray to test the shadow
         const Ray shadowRay(intersectionPoint + normal * epsilon, lightDir);
 
-        const RaySceneIntersection shadowIntersection = Intersection::computeIntersection(shadowRay, spheres, squares, meshes, kdTree, epsilon);
-
         // If the point is in shadow, skip the light
-        if (shadowIntersection.intersectionExists && shadowIntersection.t < lightDistance) {
+        if (Intersection::isOccluded(shadowRay, spheres, squares, kdTree, lightDistance, epsilon)) {
             return Vec3(0.0f); // No contribution
         }
 
@@ -178,10 +176,8 @@ public:
             // Ray to test the shadow
             Ray shadowRay(intersectionPoint + normal * epsilon, shadowDir);
 
-            const RaySceneIntersection shadowIntersection = Intersection::computeIntersection(shadowRay, spheres, squares, meshes, kdTree, epsilon);
-
             // If the point is in shadow, increment the shadow factor
-            if (shadowIntersection.intersectionExists && shadowIntersection.t < shadowDistance) {
+            if (Intersection::isOccluded(shadowRay, spheres, squares, kdTree, shadowDistance, epsilon)) {
                 shadowFactor += 1.0f;
                 if (shadowFactor >= threshold) break; // Early exit if too much shadow
             }

@@ -38,6 +38,26 @@ public:
         const Ray &ray, const std::vector<Sphere> &spheres, const std::vector<Square> &squares, const std::vector<Mesh> &meshes,
         const MeshKDTree &kd_tree, float z_near
     );
+
+    /**
+     * Tests whether anything blocks the segment between the ray origin and maxDistance.
+     *
+     * A shadow ray only needs to know whether the light is occluded, never by what. Compared to
+     * computeIntersection this skips the texture lookup and the material copy performed on every
+     * candidate hit, and returns as soon as one blocker is found instead of looking for the nearest one.
+     *
+     * @param ray The shadow ray to test.
+     * @param spheres The list of spheres in the scene.
+     * @param squares The list of squares in the scene.
+     * @param kd_tree The KD-tree for mesh acceleration.
+     * @param maxDistance Distance to the light sample; a hit beyond it does not block.
+     * @param epsilon Near cutoff, guards against the surface shadowing itself.
+     * @return True if something blocks the light.
+     */
+    static bool isOccluded(
+        const Ray &ray, const std::vector<Sphere> &spheres, const std::vector<Square> &squares,
+        const MeshKDTree &kd_tree, float maxDistance, float epsilon
+    );
 };
 
 #endif // INTERSECTION_H
