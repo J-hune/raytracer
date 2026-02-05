@@ -41,6 +41,11 @@ Thumbs.db
 # Ignore rendered images
 renders
 
+# Ignore the showcase scenes and the source models they are built from: several
+# hundred megabytes of binaries that do not belong in the history.
+scenes/
+assets/models/
+
 # Ignore CMake generated files
 cmake-build-*/
 CMakeLists.txt.user

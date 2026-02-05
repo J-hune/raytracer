@@ -1,25 +1,29 @@
-cmake_minimum_required(VERSION 3.11)
-project(raytracer)
+cmake_minimum_required(VERSION 3.24)
+project(raytracer VERSION 0.2.0 LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
+include(FetchContent)
 
-find_package(OpenGL REQUIRED)
-find_package(GLUT REQUIRED)
+set(FASTGLTF_COMPILE_AS_CPP20 ON CACHE BOOL "" FORCE)
+set(FASTGLTF_ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(FASTGLTF_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+    fastgltf
+    GIT_REPOSITORY https://github.com/spnda/fastgltf.git
+    GIT_TAG v0.9.0
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(fastgltf)
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -O3")
+add_executable(raytracer
+    src/main.cpp
+    src/scene.cpp
+)
+target_compile_features(raytracer PRIVATE cxx_std_20)
+target_compile_options(raytracer PRIVATE
+    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic>
+)
+target_link_libraries(raytracer PRIVATE fastgltf::fastgltf)
 
-# Automatic retrieval of source files
-file(GLOB_RECURSE SOURCES src/*.cpp)
-
-# Automatic retrieval of header files
-file(GLOB_RECURSE HEADERS include/*.h)
-
-# Add executable
-add_executable(raytracer ${SOURCES} ${HEADERS})
-
-include_directories(${OPENGL_INCLUDE_DIRS} ${GLUT_INCLUDE_DIRS})
-target_link_libraries(raytracer ${OPENGL_LIBRARIES} ${GLUT_LIBRARIES})
-
-# Create renders directory
-file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/renders)
+set_target_properties(raytracer PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+)
