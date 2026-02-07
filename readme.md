@@ -3,8 +3,9 @@
 GPU path tracer built around glTF 2.0 scenes. Blender is the authoring tool; the
 application only loads, displays and renders the exported scene.
 
-The renderer is being migrated to CUDA/OptiX. The current executable validates
-the new scene pipeline and reports the resources prepared for GPU upload.
+Geometry traversal, path integration, temporal accumulation and tone mapping
+run on the GPU through CUDA and OptiX. The display buffer is shared directly
+with OpenGL, without copying rendered pixels through the CPU.
 
 ## Scene format
 
@@ -26,6 +27,9 @@ Requirements:
 
 - CMake 3.24 or newer;
 - a C++20 compiler;
+- CUDA Toolkit 12 or newer;
+- an NVIDIA Turing-or-newer GPU with an R570-or-newer driver;
+- GLFW 3.4 and OpenGL development packages;
 - Git and an internet connection during the first configure.
 
 ```sh
@@ -34,8 +38,8 @@ cmake --build build -j
 ./build/bin/raytracer scene.glb
 ```
 
-fastgltf is fetched at the pinned `v0.9.0` tag. CUDA and OptiX become required
-in the next renderer milestone.
+The window accumulates one sample per pixel and frame. Press `Escape` to close
+it. fastgltf `v0.9.0` and OptiX `v9.0.0` are fetched at pinned tags.
 
 ## Previous renders
 

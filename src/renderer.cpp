@@ -1,0 +1,449 @@
+#include "renderer.hpp"
+
+#include "gpu_shared.hpp"
+
+#include <cuda_runtime.h>
+#include <optix_function_table_definition.h>
+#include <optix_stack_size.h>
+#include <optix_stubs.h>
+
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstring>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
+
+extern "C" const unsigned char deviceCode[];
+extern "C" const unsigned long deviceCodeSize;
+
+namespace rt {
+namespace {
+
+void cudaCheck(cudaError_t result) {
+    if (result != cudaSuccess)
+        throw std::runtime_error(cudaGetErrorString(result));
+}
+
+void optixCheck(OptixResult result, const char* operation) {
+    if (result != OPTIX_SUCCESS)
+        throw std::runtime_error(std::string(operation) + ": " +
+                                 optixGetErrorName(result));
+}
+
+class Buffer {
+public:
+    Buffer() = default;
+    explicit Buffer(std::size_t bytes) { resize(bytes); }
+    ~Buffer() { reset(); }
+
+    Buffer(Buffer&& other) noexcept : data_(std::exchange(other.data_, nullptr)),
+                                      size_(std::exchange(other.size_, 0)) {}
+    Buffer& operator=(Buffer&& other) noexcept {
+        if (this != &other) {
+            reset();
+            data_ = std::exchange(other.data_, nullptr);
+            size_ = std::exchange(other.size_, 0);
+        }
+        return *this;
+    }
+
+    Buffer(const Buffer&) = delete;
+    Buffer& operator=(const Buffer&) = delete;
+
+    void resize(std::size_t bytes) {
+        reset();
+        if (bytes)
+            cudaCheck(cudaMalloc(&data_, bytes));
+        size_ = bytes;
+    }
+
+    void upload(const void* source, std::size_t bytes) {
+        resize(bytes);
+        if (bytes)
+            cudaCheck(cudaMemcpy(data_, source, bytes, cudaMemcpyHostToDevice));
+    }
+
+    CUdeviceptr device() const {
+        return reinterpret_cast<CUdeviceptr>(data_);
+    }
+
+    void* data() const { return data_; }
+    std::size_t size() const { return size_; }
+
+private:
+    void reset() {
+        if (data_)
+            cudaFree(data_);
+        data_ = nullptr;
+        size_ = 0;
+    }
+
+    void* data_ = nullptr;
+    std::size_t size_ = 0;
+};
+
+template<typename T>
+struct alignas(OPTIX_SBT_RECORD_ALIGNMENT) Record {
+    std::array<char, OPTIX_SBT_RECORD_HEADER_SIZE> header;
+    T data;
+};
+
+struct Empty {};
+
+float3 normalized(float x, float y, float z) {
+    const float inverse = 1.0f / std::sqrt(x * x + y * y + z * z);
+    return make_float3(x * inverse, y * inverse, z * inverse);
+}
+
+GpuMaterial gpuMaterial(const Material& source) {
+    return {
+        make_float4(source.baseColor.x, source.baseColor.y, source.baseColor.z,
+                    source.baseColor.w),
+        make_float3(source.emissive.x, source.emissive.y, source.emissive.z),
+        source.metallic,
+        source.roughness,
+        source.transmission,
+        source.ior,
+        source.emissiveStrength
+    };
+}
+
+}
+
+struct Renderer::Impl {
+    struct GeometryState {
+        Buffer vertices;
+        Buffer indices;
+        Buffer acceleration;
+        OptixTraversableHandle handle = 0;
+        std::uint32_t material = 0;
+    };
+
+    ~Impl() {
+        if (pipeline)
+            optixPipelineDestroy(pipeline);
+        if (raygen)
+            optixProgramGroupDestroy(raygen);
+        if (miss)
+            optixProgramGroupDestroy(miss);
+        if (hit)
+            optixProgramGroupDestroy(hit);
+        if (module)
+            optixModuleDestroy(module);
+        if (context)
+            optixDeviceContextDestroy(context);
+    }
+
+    void initialize(const Scene& scene, std::uint32_t renderWidth,
+                    std::uint32_t renderHeight) {
+        if (scene.instances.empty() || scene.cameras.empty())
+            throw std::runtime_error("The scene needs geometry and a perspective camera");
+        width = renderWidth;
+        height = renderHeight;
+
+        cudaCheck(cudaFree(nullptr));
+        optixCheck(optixInit(), "optixInit");
+        OptixDeviceContextOptions contextOptions{};
+        optixCheck(optixDeviceContextCreate(nullptr, &contextOptions, &context),
+                   "optixDeviceContextCreate");
+
+        uploadMaterials(scene);
+        buildGeometry(scene);
+        buildInstances(scene);
+        createPipeline();
+        createBindingTable();
+        accumulation.resize(static_cast<std::size_t>(width) * height * sizeof(float4));
+        cudaCheck(cudaMemset(accumulation.data(), 0, accumulation.size()));
+        configureCamera(scene.cameras.front());
+    }
+
+    void uploadMaterials(const Scene& scene) {
+        std::vector<GpuMaterial> gpuMaterials;
+        gpuMaterials.reserve(scene.materials.size());
+        for (const auto& material : scene.materials)
+            gpuMaterials.push_back(gpuMaterial(material));
+        materials.upload(gpuMaterials.data(), gpuMaterials.size() * sizeof(GpuMaterial));
+    }
+
+    void buildGeometry(const Scene& scene) {
+        geometries.reserve(scene.geometries.size());
+        for (const auto& geometry : scene.geometries) {
+            auto& state = geometries.emplace_back();
+            std::vector<GpuVertex> vertices;
+            vertices.reserve(geometry.vertices.size());
+            for (const auto& vertex : geometry.vertices) {
+                vertices.push_back({
+                    make_float3(vertex.position.x, vertex.position.y, vertex.position.z),
+                    make_float3(vertex.normal.x, vertex.normal.y, vertex.normal.z),
+                    make_float4(vertex.tangent.x, vertex.tangent.y, vertex.tangent.z,
+                                vertex.tangent.w),
+                    make_float2(vertex.uv.x, vertex.uv.y)
+                });
+            }
+            state.vertices.upload(vertices.data(), vertices.size() * sizeof(GpuVertex));
+            state.indices.upload(geometry.indices.data(),
+                                 geometry.indices.size() * sizeof(std::uint32_t));
+            state.material = geometry.material;
+
+            const CUdeviceptr deviceVertices = state.vertices.device();
+            const std::uint32_t flags = OPTIX_GEOMETRY_FLAG_NONE;
+            OptixBuildInput input{};
+            input.type = OPTIX_BUILD_INPUT_TYPE_TRIANGLES;
+            input.triangleArray.vertexBuffers = &deviceVertices;
+            input.triangleArray.numVertices =
+                static_cast<std::uint32_t>(geometry.vertices.size());
+            input.triangleArray.vertexFormat = OPTIX_VERTEX_FORMAT_FLOAT3;
+            input.triangleArray.vertexStrideInBytes = sizeof(GpuVertex);
+            input.triangleArray.indexBuffer = state.indices.device();
+            input.triangleArray.numIndexTriplets =
+                static_cast<std::uint32_t>(geometry.indices.size() / 3);
+            input.triangleArray.indexFormat = OPTIX_INDICES_FORMAT_UNSIGNED_INT3;
+            input.triangleArray.indexStrideInBytes = sizeof(uint3);
+            input.triangleArray.flags = &flags;
+            input.triangleArray.numSbtRecords = 1;
+
+            OptixAccelBuildOptions options{};
+            options.buildFlags = OPTIX_BUILD_FLAG_PREFER_FAST_TRACE;
+            options.operation = OPTIX_BUILD_OPERATION_BUILD;
+            OptixAccelBufferSizes sizes{};
+            optixCheck(optixAccelComputeMemoryUsage(context, &options, &input, 1, &sizes),
+                       "optixAccelComputeMemoryUsage");
+            Buffer scratch(sizes.tempSizeInBytes);
+            state.acceleration.resize(sizes.outputSizeInBytes);
+            optixCheck(optixAccelBuild(context, nullptr, &options, &input, 1,
+                                      scratch.device(), scratch.size(),
+                                      state.acceleration.device(), state.acceleration.size(),
+                                      &state.handle, nullptr, 0),
+                       "optixAccelBuild");
+        }
+        cudaCheck(cudaDeviceSynchronize());
+    }
+
+    void buildInstances(const Scene& scene) {
+        std::vector<OptixInstance> instances(scene.instances.size());
+        for (std::size_t index = 0; index < scene.instances.size(); ++index) {
+            const auto& source = scene.instances[index];
+            auto& target = instances[index];
+            for (std::size_t row = 0; row < 3; ++row)
+                for (std::size_t column = 0; column < 4; ++column)
+                    target.transform[row * 4 + column] =
+                        source.transform.values[column * 4 + row];
+            target.instanceId = static_cast<std::uint32_t>(index);
+            target.sbtOffset = source.geometry;
+            target.visibilityMask = 255;
+            target.flags = OPTIX_INSTANCE_FLAG_NONE;
+            target.traversableHandle = geometries.at(source.geometry).handle;
+        }
+
+        Buffer instanceData;
+        instanceData.upload(instances.data(), instances.size() * sizeof(OptixInstance));
+        OptixBuildInput input{};
+        input.type = OPTIX_BUILD_INPUT_TYPE_INSTANCES;
+        input.instanceArray.instances = instanceData.device();
+        input.instanceArray.numInstances = static_cast<std::uint32_t>(instances.size());
+        OptixAccelBuildOptions options{};
+        options.buildFlags = OPTIX_BUILD_FLAG_PREFER_FAST_TRACE;
+        options.operation = OPTIX_BUILD_OPERATION_BUILD;
+        OptixAccelBufferSizes sizes{};
+        optixCheck(optixAccelComputeMemoryUsage(context, &options, &input, 1, &sizes),
+                   "optixAccelComputeMemoryUsage");
+        Buffer scratch(sizes.tempSizeInBytes);
+        acceleration.resize(sizes.outputSizeInBytes);
+        optixCheck(optixAccelBuild(context, nullptr, &options, &input, 1,
+                                  scratch.device(), scratch.size(),
+                                  acceleration.device(), acceleration.size(),
+                                  &sceneHandle, nullptr, 0),
+                   "optixAccelBuild");
+        cudaCheck(cudaDeviceSynchronize());
+    }
+
+    void createPipeline() {
+        OptixModuleCompileOptions moduleOptions{};
+        moduleOptions.optLevel = OPTIX_COMPILE_OPTIMIZATION_LEVEL_3;
+        moduleOptions.debugLevel = OPTIX_COMPILE_DEBUG_LEVEL_NONE;
+        pipelineOptions.usesMotionBlur = false;
+        pipelineOptions.traversableGraphFlags =
+            OPTIX_TRAVERSABLE_GRAPH_FLAG_ALLOW_SINGLE_LEVEL_INSTANCING;
+        pipelineOptions.numPayloadValues = 2;
+        pipelineOptions.numAttributeValues = 2;
+        pipelineOptions.exceptionFlags = OPTIX_EXCEPTION_FLAG_NONE;
+        pipelineOptions.pipelineLaunchParamsVariableName = "params";
+        pipelineOptions.usesPrimitiveTypeFlags = OPTIX_PRIMITIVE_TYPE_FLAGS_TRIANGLE;
+
+        std::array<char, 4096> log{};
+        std::size_t logSize = log.size();
+        auto result = optixModuleCreate(
+            context, &moduleOptions, &pipelineOptions,
+            reinterpret_cast<const char*>(deviceCode), deviceCodeSize,
+            log.data(), &logSize, &module);
+        if (result != OPTIX_SUCCESS)
+            throw std::runtime_error("optixModuleCreate: " +
+                                     std::string(log.data(), logSize));
+
+        raygen = createProgram(OPTIX_PROGRAM_GROUP_KIND_RAYGEN, "__raygen__render");
+        miss = createProgram(OPTIX_PROGRAM_GROUP_KIND_MISS, "__miss__environment");
+        hit = createProgram(OPTIX_PROGRAM_GROUP_KIND_HITGROUP, "__closesthit__surface");
+
+        const std::array groups{raygen, miss, hit};
+        OptixPipelineLinkOptions linkOptions{};
+        linkOptions.maxTraceDepth = 1;
+        logSize = log.size();
+        result = optixPipelineCreate(context, &pipelineOptions, &linkOptions,
+                                     groups.data(), groups.size(), log.data(),
+                                     &logSize, &pipeline);
+        if (result != OPTIX_SUCCESS)
+            throw std::runtime_error("optixPipelineCreate: " +
+                                     std::string(log.data(), logSize));
+
+        OptixStackSizes stack{};
+        for (const auto group : groups)
+            optixCheck(optixUtilAccumulateStackSizes(group, &stack, pipeline),
+                       "optixUtilAccumulateStackSizes");
+        std::uint32_t traversal;
+        std::uint32_t state;
+        std::uint32_t continuation;
+        optixCheck(optixUtilComputeStackSizes(&stack, 1, 0, 0, &traversal, &state,
+                                              &continuation),
+                   "optixUtilComputeStackSizes");
+        optixCheck(optixPipelineSetStackSize(pipeline, traversal, state, continuation, 2),
+                   "optixPipelineSetStackSize");
+    }
+
+    OptixProgramGroup createProgram(OptixProgramGroupKind kind, const char* entry) {
+        OptixProgramGroupDesc description{};
+        description.kind = kind;
+        if (kind == OPTIX_PROGRAM_GROUP_KIND_RAYGEN) {
+            description.raygen.module = module;
+            description.raygen.entryFunctionName = entry;
+        } else if (kind == OPTIX_PROGRAM_GROUP_KIND_MISS) {
+            description.miss.module = module;
+            description.miss.entryFunctionName = entry;
+        } else {
+            description.hitgroup.moduleCH = module;
+            description.hitgroup.entryFunctionNameCH = entry;
+        }
+
+        OptixProgramGroup group = nullptr;
+        OptixProgramGroupOptions options{};
+        std::array<char, 2048> log{};
+        std::size_t logSize = log.size();
+        const auto result = optixProgramGroupCreate(context, &description, 1, &options,
+                                                    log.data(), &logSize, &group);
+        if (result != OPTIX_SUCCESS)
+            throw std::runtime_error("optixProgramGroupCreate: " +
+                                     std::string(log.data(), logSize));
+        return group;
+    }
+
+    void createBindingTable() {
+        Record<Empty> raygenRecord{};
+        optixCheck(optixSbtRecordPackHeader(raygen, &raygenRecord),
+                   "optixSbtRecordPackHeader");
+        raygenRecordBuffer.upload(&raygenRecord, sizeof(raygenRecord));
+
+        Record<Empty> missRecord{};
+        optixCheck(optixSbtRecordPackHeader(miss, &missRecord),
+                   "optixSbtRecordPackHeader");
+        missRecordBuffer.upload(&missRecord, sizeof(missRecord));
+
+        std::vector<Record<HitGroupData>> hitRecords(geometries.size());
+        for (std::size_t index = 0; index < geometries.size(); ++index) {
+            auto& record = hitRecords[index];
+            optixCheck(optixSbtRecordPackHeader(hit, &record),
+                       "optixSbtRecordPackHeader");
+            record.data = {
+                reinterpret_cast<const GpuVertex*>(geometries[index].vertices.device()),
+                reinterpret_cast<const uint3*>(geometries[index].indices.device()),
+                geometries[index].material
+            };
+        }
+        hitRecordBuffer.upload(hitRecords.data(), hitRecords.size() * sizeof(hitRecords[0]));
+
+        bindingTable.raygenRecord = raygenRecordBuffer.device();
+        bindingTable.missRecordBase = missRecordBuffer.device();
+        bindingTable.missRecordStrideInBytes = sizeof(missRecord);
+        bindingTable.missRecordCount = 1;
+        bindingTable.hitgroupRecordBase = hitRecordBuffer.device();
+        bindingTable.hitgroupRecordStrideInBytes = sizeof(hitRecords[0]);
+        bindingTable.hitgroupRecordCount =
+            static_cast<std::uint32_t>(hitRecords.size());
+    }
+
+    void configureCamera(const Camera& camera) {
+        const auto& matrix = camera.transform.values;
+        const float3 right = normalized(matrix[0], matrix[1], matrix[2]);
+        const float3 up = normalized(matrix[4], matrix[5], matrix[6]);
+        const float3 direction = normalized(matrix[8], matrix[9], matrix[10]);
+        const float3 forward = make_float3(-direction.x, -direction.y, -direction.z);
+        const float aspect = camera.aspectRatio > 0.0f
+            ? camera.aspectRatio
+            : static_cast<float>(width) / static_cast<float>(height);
+        const float scale = std::tan(camera.verticalFov * 0.5f);
+        launch.eye = make_float3(matrix[12], matrix[13], matrix[14]);
+        launch.cameraU = make_float3(right.x * scale * aspect,
+                                     right.y * scale * aspect,
+                                     right.z * scale * aspect);
+        launch.cameraV = make_float3(up.x * scale, up.y * scale, up.z * scale);
+        launch.cameraW = forward;
+        launch.width = width;
+        launch.height = height;
+        launch.accumulation = static_cast<float4*>(accumulation.data());
+        launch.materials = reinterpret_cast<const GpuMaterial*>(materials.device());
+        launch.scene = sceneHandle;
+        parameters.resize(sizeof(LaunchParams));
+    }
+
+    void render(void* output) {
+        launch.output = static_cast<uchar4*>(output);
+        launch.sample = sample;
+        cudaCheck(cudaMemcpy(parameters.data(), &launch, sizeof(launch),
+                             cudaMemcpyHostToDevice));
+        optixCheck(optixLaunch(pipeline, nullptr, parameters.device(), sizeof(launch),
+                              &bindingTable, width, height, 1),
+                   "optixLaunch");
+        cudaCheck(cudaGetLastError());
+        ++sample;
+    }
+
+    std::uint32_t width = 0;
+    std::uint32_t height = 0;
+    std::uint32_t sample = 0;
+    OptixDeviceContext context = nullptr;
+    OptixModule module = nullptr;
+    OptixProgramGroup raygen = nullptr;
+    OptixProgramGroup miss = nullptr;
+    OptixProgramGroup hit = nullptr;
+    OptixPipeline pipeline = nullptr;
+    OptixPipelineCompileOptions pipelineOptions{};
+    OptixShaderBindingTable bindingTable{};
+    OptixTraversableHandle sceneHandle = 0;
+    std::vector<GeometryState> geometries;
+    Buffer materials;
+    Buffer acceleration;
+    Buffer accumulation;
+    Buffer parameters;
+    Buffer raygenRecordBuffer;
+    Buffer missRecordBuffer;
+    Buffer hitRecordBuffer;
+    LaunchParams launch{};
+};
+
+Renderer::Renderer(const Scene& scene, std::uint32_t width, std::uint32_t height)
+    : impl_(std::make_unique<Impl>()) {
+    impl_->initialize(scene, width, height);
+}
+
+Renderer::~Renderer() = default;
+
+void Renderer::render(void* output) {
+    impl_->render(output);
+}
+
+std::uint32_t Renderer::samples() const {
+    return impl_->sample;
+}
+
+}
