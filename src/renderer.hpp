@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <vector>
 
 namespace rt {
 
@@ -15,7 +16,8 @@ public:
     Renderer(const Renderer&) = delete;
     Renderer& operator=(const Renderer&) = delete;
 
-    void render(void* output);
+    void render(void* output = nullptr);
+    std::vector<std::uint8_t> pixels() const;
     std::uint32_t samples() const;
 
 private:

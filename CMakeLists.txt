@@ -5,6 +5,7 @@ include(FetchContent)
 
 find_package(CUDAToolkit 12 REQUIRED)
 find_package(OpenGL REQUIRED)
+find_package(PNG REQUIRED)
 find_package(glfw3 3.4 REQUIRED)
 
 set(FASTGLTF_COMPILE_AS_CPP20 ON CACHE BOOL "" FORCE)
@@ -54,6 +55,7 @@ add_custom_command(
 add_executable(raytracer
     "${device_source}"
     src/display.cpp
+    src/image.cpp
     src/main.cpp
     src/renderer.cpp
     src/scene.cpp
@@ -69,6 +71,7 @@ target_link_libraries(raytracer PRIVATE
     CUDA::cuda_driver
     CUDA::cudart
     OpenGL::GL
+    PNG::PNG
     fastgltf::fastgltf
     glfw
     ${CMAKE_DL_LIBS}

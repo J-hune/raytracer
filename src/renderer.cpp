@@ -103,12 +103,42 @@ GpuMaterial gpuMaterial(const Material& source) {
         make_float4(source.baseColor.x, source.baseColor.y, source.baseColor.z,
                     source.baseColor.w),
         make_float3(source.emissive.x, source.emissive.y, source.emissive.z),
+        make_float3(source.attenuationColor.x, source.attenuationColor.y,
+                    source.attenuationColor.z),
         source.metallic,
         source.roughness,
         source.transmission,
         source.ior,
-        source.emissiveStrength
+        source.thickness,
+        source.attenuationDistance,
+        source.emissiveStrength,
+        source.dispersion
     };
+}
+
+float3 point(const Mat4& matrix, const Vec3& value) {
+    const auto& m = matrix.values;
+    return make_float3(
+        m[0] * value.x + m[4] * value.y + m[8] * value.z + m[12],
+        m[1] * value.x + m[5] * value.y + m[9] * value.z + m[13],
+        m[2] * value.x + m[6] * value.y + m[10] * value.z + m[14]);
+}
+
+float3 difference(float3 a, float3 b) {
+    return make_float3(a.x - b.x, a.y - b.y, a.z - b.z);
+}
+
+float3 crossProduct(float3 a, float3 b) {
+    return make_float3(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z,
+                       a.x * b.y - a.y * b.x);
+}
+
+float length(float3 value) {
+    return std::sqrt(value.x * value.x + value.y * value.y + value.z * value.z);
+}
+
+float luminance(float3 value) {
+    return 0.2126f * value.x + 0.7152f * value.y + 0.0722f * value.z;
 }
 
 }
@@ -153,9 +183,11 @@ struct Renderer::Impl {
         uploadMaterials(scene);
         buildGeometry(scene);
         buildInstances(scene);
+        buildLights(scene);
         createPipeline();
         createBindingTable();
         accumulation.resize(static_cast<std::size_t>(width) * height * sizeof(float4));
+        output.resize(static_cast<std::size_t>(width) * height * sizeof(uchar4));
         cudaCheck(cudaMemset(accumulation.data(), 0, accumulation.size()));
         configureCamera(scene.cameras.front());
     }
@@ -258,6 +290,73 @@ struct Renderer::Impl {
                                   &sceneHandle, nullptr, 0),
                    "optixAccelBuild");
         cudaCheck(cudaDeviceSynchronize());
+    }
+
+    void buildLights(const Scene& scene) {
+        std::vector<GpuLight> source;
+        for (std::size_t instanceIndex = 0; instanceIndex < scene.instances.size();
+             ++instanceIndex) {
+            const auto& instance = scene.instances[instanceIndex];
+            const auto& geometry = scene.geometries[instance.geometry];
+            const auto& material = scene.materials[geometry.material];
+            const float3 emission = make_float3(
+                material.emissive.x * material.emissiveStrength,
+                material.emissive.y * material.emissiveStrength,
+                material.emissive.z * material.emissiveStrength);
+            if (luminance(emission) <= 0.0f)
+                continue;
+
+            for (std::size_t index = 0; index < geometry.indices.size(); index += 3) {
+                const float3 a = point(instance.transform,
+                    geometry.vertices[geometry.indices[index]].position);
+                const float3 b = point(instance.transform,
+                    geometry.vertices[geometry.indices[index + 1]].position);
+                const float3 c = point(instance.transform,
+                    geometry.vertices[geometry.indices[index + 2]].position);
+                const float3 areaVector =
+                    crossProduct(difference(b, a), difference(c, a));
+                const float twiceArea = length(areaVector);
+                if (twiceArea <= 1e-8f)
+                    continue;
+                const float area = 0.5f * twiceArea;
+                source.push_back({
+                    a, b, c,
+                    make_float3(areaVector.x / twiceArea, areaVector.y / twiceArea,
+                                areaVector.z / twiceArea),
+                    emission, area, area * luminance(emission),
+                    0.0f, 0.0f, 0.0f,
+                    static_cast<std::uint32_t>(instanceIndex),
+                    static_cast<std::uint32_t>(index / 3), 3U
+                });
+            }
+        }
+
+        for (const auto& light : scene.lights) {
+            const auto& m = light.transform.values;
+            const float3 emission = make_float3(
+                light.color.x * light.intensity,
+                light.color.y * light.intensity,
+                light.color.z * light.intensity);
+            const float3 direction = normalized(-m[8], -m[9], -m[10]);
+            const float solidAngle = light.type == 1U
+                ? 6.2831853f * (1.0f - std::cos(light.outerCone))
+                : light.type == 2U ? 12.566371f : 1.0f;
+            source.push_back({
+                make_float3(m[12], m[13], m[14]), direction, {}, {}, emission,
+                0.0f, luminance(emission) * solidAngle, light.range,
+                light.innerCone, light.outerCone,
+                0xffffffffU, 0xffffffffU, light.type
+            });
+        }
+
+        launch.lightWeight = 0.0f;
+        for (const auto& light : source)
+            launch.lightWeight += light.weight;
+        launch.lightCount = static_cast<std::uint32_t>(source.size());
+        if (!source.empty()) {
+            lights.upload(source.data(), source.size() * sizeof(GpuLight));
+            launch.lights = reinterpret_cast<const GpuLight*>(lights.device());
+        }
     }
 
     void createPipeline() {
@@ -388,6 +487,10 @@ struct Renderer::Impl {
                                      right.z * scale * aspect);
         launch.cameraV = make_float3(up.x * scale, up.y * scale, up.z * scale);
         launch.cameraW = forward;
+        launch.lensU = right;
+        launch.lensV = up;
+        launch.aperture = camera.aperture;
+        launch.focusDistance = camera.focusDistance;
         launch.width = width;
         launch.height = height;
         launch.accumulation = static_cast<float4*>(accumulation.data());
@@ -397,7 +500,7 @@ struct Renderer::Impl {
     }
 
     void render(void* output) {
-        launch.output = static_cast<uchar4*>(output);
+        launch.output = static_cast<uchar4*>(output ? output : this->output.data());
         launch.sample = sample;
         cudaCheck(cudaMemcpy(parameters.data(), &launch, sizeof(launch),
                              cudaMemcpyHostToDevice));
@@ -406,6 +509,13 @@ struct Renderer::Impl {
                    "optixLaunch");
         cudaCheck(cudaGetLastError());
         ++sample;
+    }
+
+    std::vector<std::uint8_t> pixels() const {
+        std::vector<std::uint8_t> result(output.size());
+        cudaCheck(cudaMemcpy(result.data(), output.data(), output.size(),
+                             cudaMemcpyDeviceToHost));
+        return result;
     }
 
     std::uint32_t width = 0;
@@ -422,8 +532,10 @@ struct Renderer::Impl {
     OptixTraversableHandle sceneHandle = 0;
     std::vector<GeometryState> geometries;
     Buffer materials;
+    Buffer lights;
     Buffer acceleration;
     Buffer accumulation;
+    Buffer output;
     Buffer parameters;
     Buffer raygenRecordBuffer;
     Buffer missRecordBuffer;
@@ -440,6 +552,10 @@ Renderer::~Renderer() = default;
 
 void Renderer::render(void* output) {
     impl_->render(output);
+}
+
+std::vector<std::uint8_t> Renderer::pixels() const {
+    return impl_->pixels();
 }
 
 std::uint32_t Renderer::samples() const {
