@@ -121,6 +121,40 @@ static __forceinline__ __device__ float3 sky(float3 direction) {
            make_float3(0.35f, 0.48f, 0.70f) * t;
 }
 
+static __forceinline__ __device__ float2 environmentUv(float3 direction) {
+    float u = atan2f(direction.z, direction.x) * 0.15915494f + 0.5f +
+              params.environmentRotation * 0.15915494f;
+    u -= floorf(u);
+    return make_float2(u, acosf(fminf(fmaxf(direction.y, -1.0f), 1.0f)) *
+                              0.31830989f);
+}
+
+static __forceinline__ __device__ float3 environmentTexel(int x, int y) {
+    x = (x % static_cast<int>(params.environmentWidth) +
+         static_cast<int>(params.environmentWidth)) %
+        static_cast<int>(params.environmentWidth);
+    y = min(max(y, 0), static_cast<int>(params.environmentHeight) - 1);
+    return rgb(params.environment[y * params.environmentWidth + x]);
+}
+
+static __forceinline__ __device__ float3 environment(float3 direction) {
+    if (!params.environment)
+        return sky(direction);
+
+    const float2 uv = environmentUv(direction);
+    const float x = uv.x * params.environmentWidth - 0.5f;
+    const float y = uv.y * params.environmentHeight - 0.5f;
+    const int x0 = static_cast<int>(floorf(x));
+    const int y0 = static_cast<int>(floorf(y));
+    const float tx = x - floorf(x);
+    const float ty = y - floorf(y);
+    const float3 a = environmentTexel(x0, y0) * (1.0f - tx) +
+                     environmentTexel(x0 + 1, y0) * tx;
+    const float3 b = environmentTexel(x0, y0 + 1) * (1.0f - tx) +
+                     environmentTexel(x0 + 1, y0 + 1) * tx;
+    return (a * (1.0f - ty) + b * ty) * params.environmentStrength;
+}
+
 static __forceinline__ __device__ float3 cosineDirection(float3 normal,
                                                           unsigned int& rng) {
     const float phi = 6.2831853f * random(rng);
@@ -217,6 +251,7 @@ struct LightSample {
     unsigned int instance;
     unsigned int primitive;
     bool delta;
+    bool environment;
     bool valid;
 };
 
@@ -235,6 +270,41 @@ static __forceinline__ __device__ LightSample sampleLight(float3 position,
             break;
     }
     const float choice = selected->weight / params.lightWeight;
+
+    if (selected->type == 4U) {
+        const unsigned int count =
+            params.environmentWidth * params.environmentHeight;
+        const float target = random(rng);
+        unsigned int first = 0;
+        unsigned int last = count - 1U;
+        while (first < last) {
+            const unsigned int middle = (first + last) / 2U;
+            if (params.environmentCdf[middle] < target)
+                first = middle + 1U;
+            else
+                last = middle;
+        }
+        const unsigned int index = first;
+        const float probability = params.environmentCdf[index] -
+            (index ? params.environmentCdf[index - 1U] : 0.0f);
+        const float u = (static_cast<float>(index % params.environmentWidth) +
+                         random(rng)) / params.environmentWidth;
+        const float v = (static_cast<float>(index / params.environmentWidth) +
+                         random(rng)) / params.environmentHeight;
+        const float theta = 3.14159265f * v;
+        const float phi = 6.2831853f * (u - 0.5f) - params.environmentRotation;
+        const float sine = sinf(theta);
+        sample.direction =
+            make_float3(cosf(phi) * sine, cosf(theta), sinf(phi) * sine);
+        const float solidAngle = 19.7392088f * fmaxf(sine, 1e-6f) /
+            static_cast<float>(count);
+        sample.radiance = environment(sample.direction);
+        sample.distance = 1e16f;
+        sample.pdf = choice * probability / solidAngle;
+        sample.environment = true;
+        sample.valid = true;
+        return sample;
+    }
 
     if (selected->type == 3U) {
         const float root = sqrtf(random(rng));
@@ -290,10 +360,31 @@ static __forceinline__ __device__ bool visible(float3 position, float3 normal,
     const float limit = light.delta ? light.distance - 0.002f
                                     : light.distance + 0.002f;
     const Hit blocker = trace(position + normal * 0.001f, light.direction, limit);
+    if (light.environment)
+        return !blocker.found;
     if (light.delta)
         return !blocker.found;
     return blocker.found && blocker.instance == light.instance &&
            blocker.primitive == light.primitive;
+}
+
+static __forceinline__ __device__ float environmentPdf(float3 direction) {
+    if (!params.environment || params.lightWeight <= 0.0f)
+        return 0.0f;
+    const float2 uv = environmentUv(direction);
+    const unsigned int x = min(static_cast<unsigned int>(
+        uv.x * params.environmentWidth), params.environmentWidth - 1U);
+    const unsigned int y = min(static_cast<unsigned int>(
+        uv.y * params.environmentHeight), params.environmentHeight - 1U);
+    const unsigned int index = y * params.environmentWidth + x;
+    const float probability = params.environmentCdf[index] -
+        (index ? params.environmentCdf[index - 1U] : 0.0f);
+    const float theta = 3.14159265f *
+        (static_cast<float>(y) + 0.5f) / params.environmentHeight;
+    const float solidAngle = 19.7392088f * fmaxf(sinf(theta), 1e-6f) /
+        static_cast<float>(params.environmentWidth * params.environmentHeight);
+    return params.environmentWeight / params.lightWeight *
+           probability / solidAngle;
 }
 
 static __forceinline__ __device__ float3 directLighting(
@@ -357,7 +448,9 @@ extern "C" __global__ void __raygen__render() {
     for (unsigned int depth = 0; depth < 8; ++depth) {
         const Hit hit = trace(origin, direction);
         if (!hit.found) {
-            radiance += throughput * sky(direction);
+            const float pdf = lastDelta ? 0.0f : environmentPdf(direction);
+            const float weight = lastDelta ? 1.0f : powerHeuristic(lastPdf, pdf);
+            radiance += throughput * environment(direction) * weight;
             break;
         }
 
@@ -441,7 +534,7 @@ extern "C" __global__ void __raygen__render() {
     const float3 accumulated = rgb(previous) + (radiance - rgb(previous)) * weight;
     params.accumulation[index] =
         make_float4(accumulated.x, accumulated.y, accumulated.z, 1.0f);
-    const float3 mapped = aces(accumulated);
+    const float3 mapped = aces(accumulated * exp2f(params.exposure));
     params.output[index] = make_uchar4(
         static_cast<unsigned char>(mapped.x * 255.0f + 0.5f),
         static_cast<unsigned char>(mapped.y * 255.0f + 0.5f),

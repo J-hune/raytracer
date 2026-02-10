@@ -3,6 +3,7 @@
 #include <fastgltf/core.hpp>
 #include <fastgltf/tools.hpp>
 #include <simdjson.h>
+#include <stb_image.h>
 
 #include <algorithm>
 #include <cmath>
@@ -24,18 +25,43 @@ struct CameraExtras {
     float focusDistance = 10.0f;
 };
 
+struct Extras {
+    std::vector<CameraExtras> cameras;
+    std::string environment;
+    float rotation = 0.0f;
+    float strength = 1.0f;
+    float exposure = 0.0f;
+};
+
 void parseExtras(simdjson::dom::object* extras, std::size_t index,
                  fastgltf::Category category, void* userData) {
-    if (category != fastgltf::Category::Cameras)
+    auto& state = *static_cast<Extras*>(userData);
+    if (category == fastgltf::Category::Cameras) {
+        state.cameras.resize(std::max(state.cameras.size(), index + 1));
+        auto& camera = state.cameras[index];
+        double value = 0.0;
+        if ((*extras)["raytracer_aperture"].get_double().get(value) == simdjson::SUCCESS)
+            camera.aperture = static_cast<float>(value);
+        if ((*extras)["raytracer_focus_distance"].get_double().get(value) ==
+            simdjson::SUCCESS)
+            camera.focusDistance = static_cast<float>(value);
+        return;
+    }
+    if (category != fastgltf::Category::Scenes)
         return;
 
-    auto& cameras = *static_cast<std::vector<CameraExtras>*>(userData);
-    cameras.resize(std::max(cameras.size(), index + 1));
+    std::string_view path;
+    if ((*extras)["raytracer_hdri"].get_string().get(path) == simdjson::SUCCESS)
+        state.environment = path;
     double value = 0.0;
-    if ((*extras)["raytracer_aperture"].get_double().get(value) == simdjson::SUCCESS)
-        cameras[index].aperture = static_cast<float>(value);
-    if ((*extras)["raytracer_focus_distance"].get_double().get(value) == simdjson::SUCCESS)
-        cameras[index].focusDistance = static_cast<float>(value);
+    if ((*extras)["raytracer_hdri_rotation"].get_double().get(value) ==
+        simdjson::SUCCESS)
+        state.rotation = static_cast<float>(value);
+    if ((*extras)["raytracer_hdri_strength"].get_double().get(value) ==
+        simdjson::SUCCESS)
+        state.strength = static_cast<float>(value);
+    if ((*extras)["raytracer_exposure"].get_double().get(value) == simdjson::SUCCESS)
+        state.exposure = static_cast<float>(value);
 }
 
 Vec2 vec2(const fastgltf::math::nvec2& value) {
@@ -256,6 +282,30 @@ Light light(const fastgltf::Light& source, const fastgltf::math::fmat4x4& transf
     };
 }
 
+Environment environment(const std::filesystem::path& scenePath, const Extras& extras) {
+    Environment result;
+    result.rotation = extras.rotation;
+    result.strength = extras.strength;
+    result.exposure = extras.exposure;
+    if (extras.environment.empty())
+        return result;
+
+    const auto path = scenePath.parent_path() / extras.environment;
+    int width;
+    int height;
+    int channels;
+    float* source = stbi_loadf(path.c_str(), &width, &height, &channels, 4);
+    if (!source)
+        throw error(stbi_failure_reason(), path.string());
+    result.width = static_cast<std::uint32_t>(width);
+    result.height = static_cast<std::uint32_t>(height);
+    result.pixels.resize(static_cast<std::size_t>(width) * height);
+    std::memcpy(result.pixels.data(), source,
+                result.pixels.size() * sizeof(result.pixels.front()));
+    stbi_image_free(source);
+    return result;
+}
+
 }
 
 Scene loadScene(const std::filesystem::path& path) {
@@ -281,10 +331,10 @@ Scene loadScene(const std::filesystem::path& path) {
     if (!file)
         throw error(fastgltf::getErrorMessage(file.error()), path.string());
 
-    std::vector<CameraExtras> cameraExtras;
+    Extras extras;
     fastgltf::Parser parser(extensions);
     parser.setExtrasParseCallback(parseExtras);
-    parser.setUserPointer(&cameraExtras);
+    parser.setUserPointer(&extras);
     auto loaded = parser.loadGltf(file.get(), path.parent_path(), options);
     if (!loaded)
         throw error(fastgltf::getErrorMessage(loaded.error()), path.string());
@@ -293,6 +343,7 @@ Scene loadScene(const std::filesystem::path& path) {
         throw error(fastgltf::getErrorMessage(validation), path.string());
 
     Scene scene;
+    scene.environment = environment(path, extras);
     scene.materials.reserve(asset.materials.size() + 1);
     scene.materials.emplace_back();
     for (const auto& source : asset.materials)
@@ -322,8 +373,9 @@ Scene loadScene(const std::filesystem::path& path) {
             }
             if (node.cameraIndex) {
                 const auto index = *node.cameraIndex;
-                const auto extras = index < cameraExtras.size() ? cameraExtras[index] : CameraExtras{};
-                scene.cameras.push_back(camera(asset.cameras[index], transform, extras));
+                const auto values =
+                    index < extras.cameras.size() ? extras.cameras[index] : CameraExtras{};
+                scene.cameras.push_back(camera(asset.cameras[index], transform, values));
             }
             if (node.lightIndex)
                 scene.lights.push_back(light(asset.lights[*node.lightIndex], transform));

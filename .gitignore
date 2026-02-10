@@ -37,6 +37,7 @@ src/*.o
 # Ignore OS generated files
 .DS_Store
 Thumbs.db
+*.blend1
 
 # Ignore rendered images
 renders

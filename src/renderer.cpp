@@ -181,6 +181,7 @@ struct Renderer::Impl {
                    "optixDeviceContextCreate");
 
         uploadMaterials(scene);
+        uploadEnvironment(scene);
         buildGeometry(scene);
         buildInstances(scene);
         buildLights(scene);
@@ -198,6 +199,48 @@ struct Renderer::Impl {
         for (const auto& material : scene.materials)
             gpuMaterials.push_back(gpuMaterial(material));
         materials.upload(gpuMaterials.data(), gpuMaterials.size() * sizeof(GpuMaterial));
+    }
+
+    void uploadEnvironment(const Scene& scene) {
+        const auto& source = scene.environment;
+        launch.environmentRotation = source.rotation;
+        launch.environmentStrength = source.strength;
+        launch.exposure = source.exposure;
+        if (source.pixels.empty())
+            return;
+
+        std::vector<float4> pixels;
+        std::vector<float> cdf;
+        pixels.reserve(source.pixels.size());
+        cdf.reserve(source.pixels.size());
+        double total = 0.0;
+        for (std::uint32_t y = 0; y < source.height; ++y) {
+            const float sine = std::sin(3.14159265f *
+                (static_cast<float>(y) + 0.5f) / source.height);
+            for (std::uint32_t x = 0; x < source.width; ++x) {
+                const auto& pixel = source.pixels[y * source.width + x];
+                pixels.push_back(make_float4(pixel.x, pixel.y, pixel.z, pixel.w));
+                total += luminance(make_float3(pixel.x, pixel.y, pixel.z)) * sine;
+                cdf.push_back(static_cast<float>(total));
+            }
+        }
+        if (total <= 0.0)
+            return;
+        for (auto& value : cdf)
+            value = static_cast<float>(value / total);
+
+        environment.upload(pixels.data(), pixels.size() * sizeof(float4));
+        environmentCdf.upload(cdf.data(), cdf.size() * sizeof(float));
+        launch.environment =
+            reinterpret_cast<const float4*>(environment.device());
+        launch.environmentCdf =
+            reinterpret_cast<const float*>(environmentCdf.device());
+        launch.environmentWidth = source.width;
+        launch.environmentHeight = source.height;
+        environmentPower = static_cast<float>(
+            total * 19.7392088 / static_cast<double>(source.width * source.height) *
+            source.strength);
+        launch.environmentWeight = environmentPower;
     }
 
     void buildGeometry(const Scene& scene) {
@@ -346,6 +389,12 @@ struct Renderer::Impl {
                 0.0f, luminance(emission) * solidAngle, light.range,
                 light.innerCone, light.outerCone,
                 0xffffffffU, 0xffffffffU, light.type
+            });
+        }
+        if (environmentPower > 0.0f) {
+            source.push_back({
+                {}, {}, {}, {}, {}, 0.0f, environmentPower,
+                0.0f, 0.0f, 0.0f, 0xffffffffU, 0xffffffffU, 4U
             });
         }
 
@@ -533,6 +582,8 @@ struct Renderer::Impl {
     std::vector<GeometryState> geometries;
     Buffer materials;
     Buffer lights;
+    Buffer environment;
+    Buffer environmentCdf;
     Buffer acceleration;
     Buffer accumulation;
     Buffer output;
@@ -541,6 +592,7 @@ struct Renderer::Impl {
     Buffer missRecordBuffer;
     Buffer hitRecordBuffer;
     LaunchParams launch{};
+    float environmentPower = 0.0f;
 };
 
 Renderer::Renderer(const Scene& scene, std::uint32_t width, std::uint32_t height)

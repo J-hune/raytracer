@@ -121,6 +121,15 @@ struct Light {
     std::uint32_t type;
 };
 
+struct Environment {
+    std::vector<Vec4> pixels;
+    std::uint32_t width = 0;
+    std::uint32_t height = 0;
+    float rotation = 0.0f;
+    float strength = 1.0f;
+    float exposure = 0.0f;
+};
+
 struct Scene {
     std::vector<Geometry> geometries;
     std::vector<Instance> instances;
@@ -129,6 +138,7 @@ struct Scene {
     std::vector<Texture> textures;
     std::vector<Camera> cameras;
     std::vector<Light> lights;
+    Environment environment;
 };
 
 Scene loadScene(const std::filesystem::path& path);

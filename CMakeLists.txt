@@ -20,6 +20,14 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(fastgltf)
 
 FetchContent_Declare(
+    stb
+    GIT_REPOSITORY https://github.com/nothings/stb.git
+    GIT_TAG 31c1ad37456438565541f4919958214b6e762fb4
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(stb)
+
+FetchContent_Declare(
     optix
     GIT_REPOSITORY https://github.com/NVIDIA/optix-sdk.git
     GIT_TAG v9.0.0
@@ -59,6 +67,7 @@ add_executable(raytracer
     src/main.cpp
     src/renderer.cpp
     src/scene.cpp
+    src/stb.cpp
 )
 target_compile_features(raytracer PRIVATE cxx_std_20)
 target_compile_options(raytracer PRIVATE
@@ -66,6 +75,7 @@ target_compile_options(raytracer PRIVATE
 )
 target_include_directories(raytracer PRIVATE
     "${optix_SOURCE_DIR}/include"
+    "${stb_SOURCE_DIR}"
 )
 target_link_libraries(raytracer PRIVATE
     CUDA::cuda_driver

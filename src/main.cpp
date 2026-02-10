@@ -64,6 +64,10 @@ int main(int argc, char** argv) {
         if (!scene.cameras.empty())
             std::cout << "  camera aperture " << scene.cameras.front().aperture
                       << ", focus " << scene.cameras.front().focusDistance << " m\n";
+        if (!scene.environment.pixels.empty())
+            std::cout << "  HDRI " << scene.environment.width << 'x'
+                      << scene.environment.height << ", strength "
+                      << scene.environment.strength << '\n';
 
         rt::Renderer renderer(scene, width, height);
         if (arguments.output) {

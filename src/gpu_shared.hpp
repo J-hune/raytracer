@@ -65,6 +65,8 @@ struct LaunchParams {
     float4* accumulation;
     const GpuMaterial* materials;
     const GpuLight* lights;
+    const float4* environment;
+    const float* environmentCdf;
     OptixTraversableHandle scene;
     float3 eye;
     float3 cameraU;
@@ -75,7 +77,13 @@ struct LaunchParams {
     float aperture;
     float focusDistance;
     float lightWeight;
+    float environmentWeight;
+    float environmentRotation;
+    float environmentStrength;
+    float exposure;
     unsigned int lightCount;
+    unsigned int environmentWidth;
+    unsigned int environmentHeight;
     unsigned int width;
     unsigned int height;
     unsigned int sample;
