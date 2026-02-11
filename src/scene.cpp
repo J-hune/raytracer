@@ -192,6 +192,14 @@ Geometry geometry(const fastgltf::Asset& asset, const fastgltf::Mesh& mesh,
                 result.vertices.at(index).uv = {value[0], value[1]};
             });
     }
+    const auto texcoords1 = primitive.findAttribute("TEXCOORD_1");
+    if (texcoords1 != primitive.attributes.end()) {
+        fastgltf::iterateAccessorWithIndex<fastgltf::math::fvec2>(
+            asset, asset.accessors[texcoords1->accessorIndex],
+            [&](const auto& value, std::size_t index) {
+                result.vertices.at(index).uv1 = {value[0], value[1]};
+            });
+    }
 
     const auto& indexAccessor = asset.accessors[*primitive.indicesAccessor];
     result.indices.resize(indexAccessor.count);

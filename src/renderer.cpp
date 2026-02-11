@@ -6,9 +6,11 @@
 #include <optix_function_table_definition.h>
 #include <optix_stack_size.h>
 #include <optix_stubs.h>
+#include <stb_image.h>
 
 #include <algorithm>
 #include <array>
+#include <climits>
 #include <cmath>
 #include <cstring>
 #include <stdexcept>
@@ -98,6 +100,19 @@ float3 normalized(float x, float y, float z) {
     return make_float3(x * inverse, y * inverse, z * inverse);
 }
 
+GpuTextureRef gpuTextureRef(const TextureRef& source) {
+    if (source.texture >= 0 && source.texCoord > 1)
+        throw std::runtime_error("Only glTF TEXCOORD_0 and TEXCOORD_1 are supported");
+    return {
+        source.texture,
+        source.texCoord,
+        make_float2(source.offset.x, source.offset.y),
+        make_float2(source.scale.x, source.scale.y),
+        source.rotation,
+        source.strength
+    };
+}
+
 GpuMaterial gpuMaterial(const Material& source) {
     return {
         make_float4(source.baseColor.x, source.baseColor.y, source.baseColor.z,
@@ -112,7 +127,13 @@ GpuMaterial gpuMaterial(const Material& source) {
         source.thickness,
         source.attenuationDistance,
         source.emissiveStrength,
-        source.dispersion
+        source.dispersion,
+        gpuTextureRef(source.baseColorTexture),
+        gpuTextureRef(source.metallicRoughnessTexture),
+        gpuTextureRef(source.normalTexture),
+        gpuTextureRef(source.emissiveTexture),
+        gpuTextureRef(source.transmissionTexture),
+        gpuTextureRef(source.thicknessTexture)
     };
 }
 
@@ -152,6 +173,12 @@ struct Renderer::Impl {
         std::uint32_t material = 0;
     };
 
+    struct ImageState {
+        Buffer pixels;
+        std::uint32_t width = 0;
+        std::uint32_t height = 0;
+    };
+
     ~Impl() {
         if (pipeline)
             optixPipelineDestroy(pipeline);
@@ -180,6 +207,7 @@ struct Renderer::Impl {
         optixCheck(optixDeviceContextCreate(nullptr, &contextOptions, &context),
                    "optixDeviceContextCreate");
 
+        uploadTextures(scene);
         uploadMaterials(scene);
         uploadEnvironment(scene);
         buildGeometry(scene);
@@ -199,6 +227,43 @@ struct Renderer::Impl {
         for (const auto& material : scene.materials)
             gpuMaterials.push_back(gpuMaterial(material));
         materials.upload(gpuMaterials.data(), gpuMaterials.size() * sizeof(GpuMaterial));
+    }
+
+    void uploadTextures(const Scene& scene) {
+        images.reserve(scene.images.size());
+        for (const auto& source : scene.images) {
+            if (source.encoded.size() > static_cast<std::size_t>(INT_MAX))
+                throw std::runtime_error("Texture image is too large");
+            int width;
+            int height;
+            int channels;
+            auto* decoded = stbi_load_from_memory(
+                reinterpret_cast<const stbi_uc*>(source.encoded.data()),
+                static_cast<int>(source.encoded.size()), &width, &height, &channels, 4);
+            if (!decoded)
+                throw std::runtime_error("Unable to decode texture " + source.name +
+                                         ": " + stbi_failure_reason());
+            auto& image = images.emplace_back();
+            image.width = static_cast<std::uint32_t>(width);
+            image.height = static_cast<std::uint32_t>(height);
+            image.pixels.upload(decoded,
+                static_cast<std::size_t>(width) * height * sizeof(uchar4));
+            stbi_image_free(decoded);
+        }
+
+        std::vector<GpuTexture> records;
+        records.reserve(scene.textures.size());
+        for (const auto& source : scene.textures) {
+            const auto& image = images.at(static_cast<std::size_t>(source.image));
+            records.push_back({
+                reinterpret_cast<const uchar4*>(image.pixels.device()),
+                image.width, image.height, source.wrapU, source.wrapV
+            });
+        }
+        if (!records.empty()) {
+            textures.upload(records.data(), records.size() * sizeof(GpuTexture));
+            launch.textures = reinterpret_cast<const GpuTexture*>(textures.device());
+        }
     }
 
     void uploadEnvironment(const Scene& scene) {
@@ -255,7 +320,8 @@ struct Renderer::Impl {
                     make_float3(vertex.normal.x, vertex.normal.y, vertex.normal.z),
                     make_float4(vertex.tangent.x, vertex.tangent.y, vertex.tangent.z,
                                 vertex.tangent.w),
-                    make_float2(vertex.uv.x, vertex.uv.y)
+                    make_float2(vertex.uv.x, vertex.uv.y),
+                    make_float2(vertex.uv1.x, vertex.uv1.y)
                 });
             }
             state.vertices.upload(vertices.data(), vertices.size() * sizeof(GpuVertex));
@@ -544,6 +610,7 @@ struct Renderer::Impl {
         launch.height = height;
         launch.accumulation = static_cast<float4*>(accumulation.data());
         launch.materials = reinterpret_cast<const GpuMaterial*>(materials.device());
+        launch.textures = reinterpret_cast<const GpuTexture*>(textures.device());
         launch.scene = sceneHandle;
         parameters.resize(sizeof(LaunchParams));
     }
@@ -580,7 +647,9 @@ struct Renderer::Impl {
     OptixShaderBindingTable bindingTable{};
     OptixTraversableHandle sceneHandle = 0;
     std::vector<GeometryState> geometries;
+    std::vector<ImageState> images;
     Buffer materials;
+    Buffer textures;
     Buffer lights;
     Buffer environment;
     Buffer environmentCdf;

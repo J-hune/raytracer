@@ -10,6 +10,16 @@ struct GpuVertex {
     float3 normal;
     float4 tangent;
     float2 uv;
+    float2 uv1;
+};
+
+struct GpuTextureRef {
+    int texture;
+    unsigned int texCoord;
+    float2 offset;
+    float2 scale;
+    float rotation;
+    float strength;
 };
 
 struct GpuMaterial {
@@ -24,12 +34,28 @@ struct GpuMaterial {
     float attenuationDistance;
     float emissiveStrength;
     float dispersion;
+    GpuTextureRef baseColorTexture;
+    GpuTextureRef metallicRoughnessTexture;
+    GpuTextureRef normalTexture;
+    GpuTextureRef emissiveTexture;
+    GpuTextureRef transmissionTexture;
+    GpuTextureRef thicknessTexture;
+};
+
+struct GpuTexture {
+    const uchar4* pixels;
+    unsigned int width;
+    unsigned int height;
+    unsigned int wrapU;
+    unsigned int wrapV;
 };
 
 struct Hit {
     float3 position;
     float3 normal;
+    float4 tangent;
     float2 uv;
+    float2 uv1;
     float distance;
     unsigned int material;
     unsigned int instance;
@@ -64,6 +90,7 @@ struct LaunchParams {
     uchar4* output;
     float4* accumulation;
     const GpuMaterial* materials;
+    const GpuTexture* textures;
     const GpuLight* lights;
     const float4* environment;
     const float* environmentCdf;

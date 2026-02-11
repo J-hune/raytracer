@@ -73,6 +73,109 @@ static __forceinline__ __device__ float3 rgb(float4 value) {
     return make_float3(value.x, value.y, value.z);
 }
 
+static __forceinline__ __device__ float linear(float value) {
+    return value <= 0.04045f ? value / 12.92f
+                            : powf((value + 0.055f) / 1.055f, 2.4f);
+}
+
+static __forceinline__ __device__ int wrapped(int value, unsigned int size,
+                                               unsigned int mode) {
+    if (mode == 33071U)
+        return min(max(value, 0), static_cast<int>(size) - 1);
+    if (mode == 33648U) {
+        const int period = static_cast<int>(size) * 2;
+        int coordinate = (value % period + period) % period;
+        return coordinate < static_cast<int>(size)
+            ? coordinate : period - coordinate - 1;
+    }
+    return (value % static_cast<int>(size) + static_cast<int>(size)) %
+           static_cast<int>(size);
+}
+
+static __forceinline__ __device__ float4 textureTexel(
+    const GpuTexture& texture, int x, int y) {
+    const uchar4 value = texture.pixels[
+        wrapped(y, texture.height, texture.wrapV) * texture.width +
+        wrapped(x, texture.width, texture.wrapU)];
+    return make_float4(value.x / 255.0f, value.y / 255.0f,
+                       value.z / 255.0f, value.w / 255.0f);
+}
+
+static __forceinline__ __device__ float4 texture(
+    const GpuTextureRef& reference, const Hit& hit, bool srgb) {
+    if (reference.texture < 0)
+        return make_float4(1.0f, 1.0f, 1.0f, 1.0f);
+    const GpuTexture source = params.textures[reference.texture];
+    const float2 input = reference.texCoord == 1U ? hit.uv1 : hit.uv;
+    const float2 scaled =
+        make_float2(input.x * reference.scale.x, input.y * reference.scale.y);
+    const float cosine = cosf(reference.rotation);
+    const float sine = sinf(reference.rotation);
+    const float2 uv = make_float2(
+        reference.offset.x + cosine * scaled.x - sine * scaled.y,
+        reference.offset.y + sine * scaled.x + cosine * scaled.y);
+    const float x = uv.x * source.width - 0.5f;
+    const float y = uv.y * source.height - 0.5f;
+    const int x0 = static_cast<int>(floorf(x));
+    const int y0 = static_cast<int>(floorf(y));
+    const float tx = x - floorf(x);
+    const float ty = y - floorf(y);
+    const float4 a = textureTexel(source, x0, y0);
+    const float4 b = textureTexel(source, x0 + 1, y0);
+    const float4 c = textureTexel(source, x0, y0 + 1);
+    const float4 d = textureTexel(source, x0 + 1, y0 + 1);
+    float4 value = make_float4(
+        (a.x * (1.0f - tx) + b.x * tx) * (1.0f - ty) +
+            (c.x * (1.0f - tx) + d.x * tx) * ty,
+        (a.y * (1.0f - tx) + b.y * tx) * (1.0f - ty) +
+            (c.y * (1.0f - tx) + d.y * tx) * ty,
+        (a.z * (1.0f - tx) + b.z * tx) * (1.0f - ty) +
+            (c.z * (1.0f - tx) + d.z * tx) * ty,
+        (a.w * (1.0f - tx) + b.w * tx) * (1.0f - ty) +
+            (c.w * (1.0f - tx) + d.w * tx) * ty);
+    if (srgb) {
+        value.x = linear(value.x);
+        value.y = linear(value.y);
+        value.z = linear(value.z);
+    }
+    return value;
+}
+
+static __forceinline__ __device__ GpuMaterial textured(
+    GpuMaterial material, const Hit& hit) {
+    const float4 base = texture(material.baseColorTexture, hit, true);
+    material.baseColor.x *= base.x;
+    material.baseColor.y *= base.y;
+    material.baseColor.z *= base.z;
+    material.baseColor.w *= base.w;
+    const float4 pbr = texture(material.metallicRoughnessTexture, hit, false);
+    material.roughness *= pbr.y;
+    material.metallic *= pbr.z;
+    const float4 emissive = texture(material.emissiveTexture, hit, true);
+    material.emissive.x *= emissive.x;
+    material.emissive.y *= emissive.y;
+    material.emissive.z *= emissive.z;
+    material.transmission *= texture(material.transmissionTexture, hit, false).x;
+    material.thickness *= texture(material.thicknessTexture, hit, false).y;
+    return material;
+}
+
+static __forceinline__ __device__ float3 mappedNormal(
+    const Hit& hit, const GpuMaterial& material) {
+    if (material.normalTexture.texture < 0)
+        return hit.normal;
+    const float4 sample = texture(material.normalTexture, hit, false);
+    const float3 tangent =
+        normalize(make_float3(hit.tangent.x, hit.tangent.y, hit.tangent.z));
+    const float3 local = normalize(make_float3(
+        (sample.x * 2.0f - 1.0f) * material.normalTexture.strength,
+        (sample.y * 2.0f - 1.0f) * material.normalTexture.strength,
+        sample.z * 2.0f - 1.0f));
+    return normalize(tangent * local.x +
+        cross(hit.normal, tangent) * (local.y * hit.tangent.w) +
+        hit.normal * local.z);
+}
+
 static __forceinline__ __device__ float maximum(float3 value) {
     return fmaxf(fmaxf(value.x, value.y), value.z);
 }
@@ -446,7 +549,7 @@ extern "C" __global__ void __raygen__render() {
     bool lastDelta = true;
 
     for (unsigned int depth = 0; depth < 8; ++depth) {
-        const Hit hit = trace(origin, direction);
+        Hit hit = trace(origin, direction);
         if (!hit.found) {
             const float pdf = lastDelta ? 0.0f : environmentPdf(direction);
             const float weight = lastDelta ? 1.0f : powerHeuristic(lastPdf, pdf);
@@ -454,7 +557,8 @@ extern "C" __global__ void __raygen__render() {
             break;
         }
 
-        const GpuMaterial material = params.materials[hit.material];
+        const GpuMaterial material = textured(params.materials[hit.material], hit);
+        hit.normal = mappedNormal(hit, material);
         if (medium >= 0)
             throughput *= absorption(params.materials[medium], hit.distance);
         const float lightPdf = lastDelta ? 0.0f : emissivePdf(lastOrigin, hit);
@@ -551,20 +655,58 @@ extern "C" __global__ void __closesthit__surface() {
     const uint3 triangle = data->indices[optixGetPrimitiveIndex()];
     const float2 barycentrics = optixGetTriangleBarycentrics();
     const float b0 = 1.0f - barycentrics.x - barycentrics.y;
-    float3 normal = data->vertices[triangle.x].normal * b0 +
-                    data->vertices[triangle.y].normal * barycentrics.x +
-                    data->vertices[triangle.z].normal * barycentrics.y;
+    const GpuVertex v0 = data->vertices[triangle.x];
+    const GpuVertex v1 = data->vertices[triangle.y];
+    const GpuVertex v2 = data->vertices[triangle.z];
+    float3 normal = v0.normal * b0 + v1.normal * barycentrics.x +
+                    v2.normal * barycentrics.y;
     if (dot(normal, normal) < 1e-12f) {
-        const float3 a = data->vertices[triangle.x].position;
-        const float3 b = data->vertices[triangle.y].position;
-        const float3 c = data->vertices[triangle.z].position;
-        normal = cross(b - a, c - a);
+        normal = cross(v1.position - v0.position, v2.position - v0.position);
     }
 
+    const float3 objectNormal = normalize(normal);
     normal = normalize(optixTransformNormalFromObjectToWorldSpace(normal));
     const float3 ray = optixGetWorldRayDirection();
     hit->frontFace = dot(normal, ray) < 0.0f;
     hit->normal = hit->frontFace ? normal : -normal;
+    float4 tangent = make_float4(
+        v0.tangent.x * b0 + v1.tangent.x * barycentrics.x +
+            v2.tangent.x * barycentrics.y,
+        v0.tangent.y * b0 + v1.tangent.y * barycentrics.x +
+            v2.tangent.y * barycentrics.y,
+        v0.tangent.z * b0 + v1.tangent.z * barycentrics.x +
+            v2.tangent.z * barycentrics.y,
+        v0.tangent.w * b0 + v1.tangent.w * barycentrics.x +
+            v2.tangent.w * barycentrics.y);
+    float3 tangentDirection = make_float3(tangent.x, tangent.y, tangent.z);
+    if (dot(tangentDirection, tangentDirection) < 1e-12f) {
+        const float2 duv1 = make_float2(v1.uv.x - v0.uv.x, v1.uv.y - v0.uv.y);
+        const float2 duv2 = make_float2(v2.uv.x - v0.uv.x, v2.uv.y - v0.uv.y);
+        const float determinant = duv1.x * duv2.y - duv1.y * duv2.x;
+        tangentDirection = fabsf(determinant) > 1e-8f
+            ? ((v1.position - v0.position) * duv2.y -
+               (v2.position - v0.position) * duv1.y) / determinant
+            : cross(fabsf(objectNormal.x) > 0.5f
+                        ? make_float3(0.0f, 1.0f, 0.0f)
+                        : make_float3(1.0f, 0.0f, 0.0f),
+                    objectNormal);
+        tangent.w = 1.0f;
+    }
+    tangentDirection =
+        optixTransformVectorFromObjectToWorldSpace(tangentDirection);
+    tangentDirection = normalize(
+        tangentDirection - hit->normal * dot(tangentDirection, hit->normal));
+    hit->tangent =
+        make_float4(tangentDirection.x, tangentDirection.y, tangentDirection.z,
+                    tangent.w < 0.0f ? -1.0f : 1.0f);
+    hit->uv = make_float2(v0.uv.x * b0 + v1.uv.x * barycentrics.x +
+                              v2.uv.x * barycentrics.y,
+                          v0.uv.y * b0 + v1.uv.y * barycentrics.x +
+                              v2.uv.y * barycentrics.y);
+    hit->uv1 = make_float2(v0.uv1.x * b0 + v1.uv1.x * barycentrics.x +
+                               v2.uv1.x * barycentrics.y,
+                           v0.uv1.y * b0 + v1.uv1.y * barycentrics.x +
+                               v2.uv1.y * barycentrics.y);
     hit->position = optixGetWorldRayOrigin() + optixGetRayTmax() * ray;
     hit->distance = optixGetRayTmax();
     hit->material = data->material;

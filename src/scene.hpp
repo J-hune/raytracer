@@ -37,6 +37,7 @@ struct Vertex {
     Vec3 normal;
     Vec4 tangent;
     Vec2 uv;
+    Vec2 uv1;
 };
 
 struct TextureRef {
