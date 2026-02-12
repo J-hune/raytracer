@@ -180,6 +180,8 @@ struct Renderer::Impl {
     };
 
     ~Impl() {
+        if (denoiser)
+            optixDenoiserDestroy(denoiser);
         if (pipeline)
             optixPipelineDestroy(pipeline);
         if (raygen)
@@ -195,11 +197,12 @@ struct Renderer::Impl {
     }
 
     void initialize(const Scene& scene, std::uint32_t renderWidth,
-                    std::uint32_t renderHeight) {
+                    std::uint32_t renderHeight, Profile profile) {
         if (scene.instances.empty() || scene.cameras.empty())
             throw std::runtime_error("The scene needs geometry and a perspective camera");
         width = renderWidth;
         height = renderHeight;
+        launch.maxDepth = profile == Profile::Final ? 12U : 5U;
 
         cudaCheck(cudaFree(nullptr));
         optixCheck(optixInit(), "optixInit");
@@ -616,6 +619,7 @@ struct Renderer::Impl {
     }
 
     void render(void* output) {
+        launch.display = nullptr;
         launch.output = static_cast<uchar4*>(output ? output : this->output.data());
         launch.sample = sample;
         cudaCheck(cudaMemcpy(parameters.data(), &launch, sizeof(launch),
@@ -627,9 +631,76 @@ struct Renderer::Impl {
         ++sample;
     }
 
+    OptixImage2D image(CUdeviceptr data) const {
+        return {
+            data, width, height, width * static_cast<unsigned int>(sizeof(float4)),
+            static_cast<unsigned int>(sizeof(float4)), OPTIX_PIXEL_FORMAT_FLOAT4
+        };
+    }
+
+    void denoiseImage() {
+        if (!denoiser) {
+            OptixDenoiserOptions options{};
+            options.denoiseAlpha = OPTIX_DENOISER_ALPHA_MODE_COPY;
+            optixCheck(optixDenoiserCreate(context, OPTIX_DENOISER_MODEL_KIND_HDR,
+                                           &options, &denoiser),
+                       "optixDenoiserCreate");
+            OptixDenoiserSizes sizes{};
+            optixCheck(optixDenoiserComputeMemoryResources(
+                           denoiser, width, height, &sizes),
+                       "optixDenoiserComputeMemoryResources");
+            denoiserState.resize(sizes.stateSizeInBytes);
+            denoiserScratch.resize(std::max(
+                sizes.withoutOverlapScratchSizeInBytes,
+                sizes.computeIntensitySizeInBytes));
+            denoised.resize(accumulation.size());
+            denoiserIntensity.resize(sizeof(float));
+            optixCheck(optixDenoiserSetup(
+                           denoiser, nullptr, width, height, denoiserState.device(),
+                           denoiserState.size(), denoiserScratch.device(),
+                           denoiserScratch.size()),
+                       "optixDenoiserSetup");
+        }
+
+        const auto input = image(accumulation.device());
+        optixCheck(optixDenoiserComputeIntensity(
+                       denoiser, nullptr, &input, denoiserIntensity.device(),
+                       denoiserScratch.device(), denoiserScratch.size()),
+                   "optixDenoiserComputeIntensity");
+        OptixDenoiserParams denoiserParams{};
+        denoiserParams.hdrIntensity = denoiserIntensity.device();
+        OptixDenoiserGuideLayer guides{};
+        OptixDenoiserLayer layer{};
+        layer.input = input;
+        layer.output = image(denoised.device());
+        optixCheck(optixDenoiserInvoke(
+                       denoiser, nullptr, &denoiserParams, denoiserState.device(),
+                       denoiserState.size(), &guides, &layer, 1, 0, 0,
+                       denoiserScratch.device(), denoiserScratch.size()),
+                   "optixDenoiserInvoke");
+
+        launch.display = static_cast<const float4*>(denoised.data());
+        launch.output = static_cast<uchar4*>(output.data());
+        cudaCheck(cudaMemcpy(parameters.data(), &launch, sizeof(launch),
+                             cudaMemcpyHostToDevice));
+        optixCheck(optixLaunch(pipeline, nullptr, parameters.device(), sizeof(launch),
+                              &bindingTable, width, height, 1),
+                   "optixLaunch");
+        cudaCheck(cudaGetLastError());
+        denoisedReady = true;
+    }
+
     std::vector<std::uint8_t> pixels() const {
         std::vector<std::uint8_t> result(output.size());
         cudaCheck(cudaMemcpy(result.data(), output.data(), output.size(),
+                             cudaMemcpyDeviceToHost));
+        return result;
+    }
+
+    std::vector<float> linearPixels() const {
+        const Buffer& source = denoisedReady ? denoised : accumulation;
+        std::vector<float> result(source.size() / sizeof(float));
+        cudaCheck(cudaMemcpy(result.data(), source.data(), source.size(),
                              cudaMemcpyDeviceToHost));
         return result;
     }
@@ -642,6 +713,7 @@ struct Renderer::Impl {
     OptixProgramGroup raygen = nullptr;
     OptixProgramGroup miss = nullptr;
     OptixProgramGroup hit = nullptr;
+    OptixDenoiser denoiser = nullptr;
     OptixPipeline pipeline = nullptr;
     OptixPipelineCompileOptions pipelineOptions{};
     OptixShaderBindingTable bindingTable{};
@@ -656,17 +728,23 @@ struct Renderer::Impl {
     Buffer acceleration;
     Buffer accumulation;
     Buffer output;
+    Buffer denoised;
+    Buffer denoiserState;
+    Buffer denoiserScratch;
+    Buffer denoiserIntensity;
     Buffer parameters;
     Buffer raygenRecordBuffer;
     Buffer missRecordBuffer;
     Buffer hitRecordBuffer;
     LaunchParams launch{};
     float environmentPower = 0.0f;
+    bool denoisedReady = false;
 };
 
-Renderer::Renderer(const Scene& scene, std::uint32_t width, std::uint32_t height)
+Renderer::Renderer(const Scene& scene, std::uint32_t width, std::uint32_t height,
+                   Profile profile)
     : impl_(std::make_unique<Impl>()) {
-    impl_->initialize(scene, width, height);
+    impl_->initialize(scene, width, height, profile);
 }
 
 Renderer::~Renderer() = default;
@@ -675,8 +753,16 @@ void Renderer::render(void* output) {
     impl_->render(output);
 }
 
+void Renderer::denoise() {
+    impl_->denoiseImage();
+}
+
 std::vector<std::uint8_t> Renderer::pixels() const {
     return impl_->pixels();
+}
+
+std::vector<float> Renderer::linearPixels() const {
+    return impl_->linearPixels();
 }
 
 std::uint32_t Renderer::samples() const {

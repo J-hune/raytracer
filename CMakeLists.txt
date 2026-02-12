@@ -6,6 +6,7 @@ include(FetchContent)
 find_package(CUDAToolkit 12 REQUIRED)
 find_package(OpenGL REQUIRED)
 find_package(PNG REQUIRED)
+find_package(ZLIB REQUIRED)
 find_package(glfw3 3.4 REQUIRED)
 
 set(FASTGLTF_COMPILE_AS_CPP20 ON CACHE BOOL "" FORCE)
@@ -26,6 +27,15 @@ FetchContent_Declare(
     GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(stb)
+
+FetchContent_Declare(
+    tinyexr
+    GIT_REPOSITORY https://github.com/syoyo/tinyexr.git
+    GIT_TAG v1.0.13
+    GIT_SHALLOW TRUE
+    SOURCE_SUBDIR no-cmake-project
+)
+FetchContent_MakeAvailable(tinyexr)
 
 FetchContent_Declare(
     optix
@@ -68,7 +78,9 @@ add_executable(raytracer
     src/renderer.cpp
     src/scene.cpp
     src/stb.cpp
+    src/tinyexr.cpp
 )
+set_source_files_properties(src/tinyexr.cpp PROPERTIES COMPILE_OPTIONS -w)
 target_compile_features(raytracer PRIVATE cxx_std_20)
 target_compile_options(raytracer PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic>
@@ -76,12 +88,14 @@ target_compile_options(raytracer PRIVATE
 target_include_directories(raytracer PRIVATE
     "${optix_SOURCE_DIR}/include"
     "${stb_SOURCE_DIR}"
+    "${tinyexr_SOURCE_DIR}"
 )
 target_link_libraries(raytracer PRIVATE
     CUDA::cuda_driver
     CUDA::cudart
     OpenGL::GL
     PNG::PNG
+    ZLIB::ZLIB
     fastgltf::fastgltf
     glfw
     ${CMAKE_DL_LIBS}

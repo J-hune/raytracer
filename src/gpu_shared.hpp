@@ -89,6 +89,7 @@ struct GpuLight {
 struct LaunchParams {
     uchar4* output;
     float4* accumulation;
+    const float4* display;
     const GpuMaterial* materials;
     const GpuTexture* textures;
     const GpuLight* lights;
@@ -114,6 +115,7 @@ struct LaunchParams {
     unsigned int width;
     unsigned int height;
     unsigned int sample;
+    unsigned int maxDepth;
 };
 
 }

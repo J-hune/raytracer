@@ -528,6 +528,15 @@ static __forceinline__ __device__ float emissivePdf(float3 origin, const Hit& hi
 extern "C" __global__ void __raygen__render() {
     const uint3 pixel = optixGetLaunchIndex();
     const unsigned int index = pixel.y * params.width + pixel.x;
+    if (params.display) {
+        const float3 mapped =
+            aces(rgb(params.display[index]) * exp2f(params.exposure));
+        params.output[index] = make_uchar4(
+            static_cast<unsigned char>(mapped.x * 255.0f + 0.5f),
+            static_cast<unsigned char>(mapped.y * 255.0f + 0.5f),
+            static_cast<unsigned char>(mapped.z * 255.0f + 0.5f), 255);
+        return;
+    }
     unsigned int rng = index * 9781U + params.sample * 6271U + 0x68bc21ebU;
     const float2 jitter = make_float2(random(rng), random(rng));
     const float2 screen = make_float2(
@@ -548,7 +557,7 @@ extern "C" __global__ void __raygen__render() {
     float3 lastOrigin = origin;
     bool lastDelta = true;
 
-    for (unsigned int depth = 0; depth < 8; ++depth) {
+    for (unsigned int depth = 0; depth < params.maxDepth; ++depth) {
         Hit hit = trace(origin, direction);
         if (!hit.found) {
             const float pdf = lastDelta ? 0.0f : environmentPdf(direction);
