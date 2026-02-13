@@ -24,6 +24,9 @@ public:
 
     void render(void* output = nullptr);
     void denoise();
+    void setCamera(const Camera& camera);
+    void setProfile(Profile profile);
+    void copyOutput(void* output) const;
     std::vector<std::uint8_t> pixels() const;
     std::vector<float> linearPixels() const;
     std::uint32_t samples() const;

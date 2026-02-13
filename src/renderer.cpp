@@ -56,6 +56,8 @@ public:
     Buffer& operator=(const Buffer&) = delete;
 
     void resize(std::size_t bytes) {
+        if (bytes == size_)
+            return;
         reset();
         if (bytes)
             cudaCheck(cudaMalloc(&data_, bytes));
@@ -618,6 +620,22 @@ struct Renderer::Impl {
         parameters.resize(sizeof(LaunchParams));
     }
 
+    void reset() {
+        cudaCheck(cudaMemset(accumulation.data(), 0, accumulation.size()));
+        sample = 0;
+        denoisedReady = false;
+    }
+
+    void setCamera(const Camera& camera) {
+        configureCamera(camera);
+        reset();
+    }
+
+    void setProfile(Profile profile) {
+        launch.maxDepth = profile == Profile::Final ? 12U : 5U;
+        reset();
+    }
+
     void render(void* output) {
         launch.display = nullptr;
         launch.output = static_cast<uchar4*>(output ? output : this->output.data());
@@ -697,6 +715,11 @@ struct Renderer::Impl {
         return result;
     }
 
+    void copyOutput(void* destination) const {
+        cudaCheck(cudaMemcpy(destination, output.data(), output.size(),
+                             cudaMemcpyDeviceToDevice));
+    }
+
     std::vector<float> linearPixels() const {
         const Buffer& source = denoisedReady ? denoised : accumulation;
         std::vector<float> result(source.size() / sizeof(float));
@@ -755,6 +778,18 @@ void Renderer::render(void* output) {
 
 void Renderer::denoise() {
     impl_->denoiseImage();
+}
+
+void Renderer::setCamera(const Camera& camera) {
+    impl_->setCamera(camera);
+}
+
+void Renderer::setProfile(Profile profile) {
+    impl_->setProfile(profile);
+}
+
+void Renderer::copyOutput(void* output) const {
+    impl_->copyOutput(output);
 }
 
 std::vector<std::uint8_t> Renderer::pixels() const {
