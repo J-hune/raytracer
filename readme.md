@@ -32,6 +32,12 @@ For colored absorption, add Blender's `glTF Material Output` node to the
 material and set a non-zero thickness. This exports standard
 `KHR_materials_volume`; the renderer does not use a private material format.
 
+The optional Blender extension in
+`tools/blender/raytracer_tools` exposes these settings in the 3D View sidebar.
+It can aim the active camera at the selected object, set its focus distance and
+export the current scene as GLB. Blender remains the scene editor; the viewer
+does not duplicate its placement or material UI.
+
 ## Build
 
 Requirements:
