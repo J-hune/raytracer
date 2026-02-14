@@ -86,15 +86,25 @@ struct GpuLight {
     unsigned int type;
 };
 
+struct Photon {
+    float3 position;
+    float3 power;
+    float3 normal;
+};
+
 struct LaunchParams {
     uchar4* output;
     float4* accumulation;
+    float4* albedoGuide;
+    float4* normalGuide;
     const float4* display;
     const GpuMaterial* materials;
     const GpuTexture* textures;
     const GpuLight* lights;
     const float4* environment;
     const float* environmentCdf;
+    Photon* photons;
+    unsigned int* photonBuckets;
     OptixTraversableHandle scene;
     float3 eye;
     float3 cameraU;
@@ -109,6 +119,9 @@ struct LaunchParams {
     float environmentRotation;
     float environmentStrength;
     float exposure;
+    float3 sceneCenter;
+    float sceneRadius;
+    float photonRadius;
     unsigned int lightCount;
     unsigned int environmentWidth;
     unsigned int environmentHeight;
@@ -116,6 +129,9 @@ struct LaunchParams {
     unsigned int height;
     unsigned int sample;
     unsigned int maxDepth;
+    unsigned int photonBucketCount;
+    unsigned int photonBucketSize;
+    unsigned int photonEmissions;
 };
 
 }

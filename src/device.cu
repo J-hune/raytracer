@@ -358,12 +358,16 @@ struct LightSample {
     bool valid;
 };
 
-static __forceinline__ __device__ LightSample sampleLight(float3 position,
-                                                          unsigned int& rng) {
-    LightSample sample{};
-    if (params.lightCount == 0U || params.lightWeight <= 0.0f)
-        return sample;
+struct EnvironmentSample {
+    float3 direction;
+    float3 radiance;
+    float pdf;
+};
 
+static __forceinline__ __device__ const GpuLight* selectLight(
+    unsigned int& rng, float& probability) {
+    if (params.lightCount == 0U || params.lightWeight <= 0.0f)
+        return nullptr;
     float target = random(rng) * params.lightWeight;
     const GpuLight* selected = &params.lights[params.lightCount - 1U];
     for (unsigned int index = 0; index < params.lightCount; ++index) {
@@ -372,38 +376,55 @@ static __forceinline__ __device__ LightSample sampleLight(float3 position,
         if (target <= 0.0f)
             break;
     }
-    const float choice = selected->weight / params.lightWeight;
+    probability = selected->weight / params.lightWeight;
+    return selected;
+}
+
+static __forceinline__ __device__ EnvironmentSample sampleEnvironment(
+    unsigned int& rng) {
+    const unsigned int count =
+        params.environmentWidth * params.environmentHeight;
+    const float target = random(rng);
+    unsigned int first = 0;
+    unsigned int last = count - 1U;
+    while (first < last) {
+        const unsigned int middle = (first + last) / 2U;
+        if (params.environmentCdf[middle] < target)
+            first = middle + 1U;
+        else
+            last = middle;
+    }
+    const unsigned int index = first;
+    const float probability = params.environmentCdf[index] -
+        (index ? params.environmentCdf[index - 1U] : 0.0f);
+    const float u = (static_cast<float>(index % params.environmentWidth) +
+                     random(rng)) / params.environmentWidth;
+    const float v = (static_cast<float>(index / params.environmentWidth) +
+                     random(rng)) / params.environmentHeight;
+    const float theta = 3.14159265f * v;
+    const float phi = 6.2831853f * (u - 0.5f) - params.environmentRotation;
+    const float sine = sinf(theta);
+    const float3 direction =
+        make_float3(cosf(phi) * sine, cosf(theta), sinf(phi) * sine);
+    const float solidAngle = 19.7392088f * fmaxf(sine, 1e-6f) /
+        static_cast<float>(count);
+    return {direction, environment(direction), probability / solidAngle};
+}
+
+static __forceinline__ __device__ LightSample sampleLight(float3 position,
+                                                          unsigned int& rng) {
+    LightSample sample{};
+    float choice = 0.0f;
+    const GpuLight* selected = selectLight(rng, choice);
+    if (!selected)
+        return sample;
 
     if (selected->type == 4U) {
-        const unsigned int count =
-            params.environmentWidth * params.environmentHeight;
-        const float target = random(rng);
-        unsigned int first = 0;
-        unsigned int last = count - 1U;
-        while (first < last) {
-            const unsigned int middle = (first + last) / 2U;
-            if (params.environmentCdf[middle] < target)
-                first = middle + 1U;
-            else
-                last = middle;
-        }
-        const unsigned int index = first;
-        const float probability = params.environmentCdf[index] -
-            (index ? params.environmentCdf[index - 1U] : 0.0f);
-        const float u = (static_cast<float>(index % params.environmentWidth) +
-                         random(rng)) / params.environmentWidth;
-        const float v = (static_cast<float>(index / params.environmentWidth) +
-                         random(rng)) / params.environmentHeight;
-        const float theta = 3.14159265f * v;
-        const float phi = 6.2831853f * (u - 0.5f) - params.environmentRotation;
-        const float sine = sinf(theta);
-        sample.direction =
-            make_float3(cosf(phi) * sine, cosf(theta), sinf(phi) * sine);
-        const float solidAngle = 19.7392088f * fmaxf(sine, 1e-6f) /
-            static_cast<float>(count);
-        sample.radiance = environment(sample.direction);
+        const auto source = sampleEnvironment(rng);
+        sample.direction = source.direction;
+        sample.radiance = source.radiance;
         sample.distance = 1e16f;
-        sample.pdf = choice * probability / solidAngle;
+        sample.pdf = choice * source.pdf;
         sample.environment = true;
         sample.valid = true;
         return sample;
@@ -525,6 +546,221 @@ static __forceinline__ __device__ float emissivePdf(float3 origin, const Hit& hi
     return 0.0f;
 }
 
+struct PhotonEmission {
+    float3 origin;
+    float3 direction;
+    float3 power;
+    bool valid;
+};
+
+static __forceinline__ __device__ float3 directionAround(
+    float3 axis, float cosine, unsigned int& rng) {
+    const float sine = sqrtf(fmaxf(0.0f, 1.0f - cosine * cosine));
+    const float angle = 6.2831853f * random(rng);
+    const float3 tangent = normalize(fabsf(axis.x) > 0.5f
+        ? cross(make_float3(0.0f, 1.0f, 0.0f), axis)
+        : cross(make_float3(1.0f, 0.0f, 0.0f), axis));
+    return normalize(axis * cosine + tangent * (sine * cosf(angle)) +
+                     cross(axis, tangent) * (sine * sinf(angle)));
+}
+
+static __forceinline__ __device__ float3 diskOffset(
+    float3 normal, float radius, unsigned int& rng) {
+    const float distance = sqrtf(random(rng)) * radius;
+    const float angle = 6.2831853f * random(rng);
+    const float3 tangent = normalize(fabsf(normal.x) > 0.5f
+        ? cross(make_float3(0.0f, 1.0f, 0.0f), normal)
+        : cross(make_float3(1.0f, 0.0f, 0.0f), normal));
+    return tangent * (distance * cosf(angle)) +
+           cross(normal, tangent) * (distance * sinf(angle));
+}
+
+static __forceinline__ __device__ PhotonEmission emitPhoton(
+    unsigned int& rng) {
+    PhotonEmission photon{};
+    float choice = 0.0f;
+    const GpuLight* light = selectLight(rng, choice);
+    if (!light)
+        return photon;
+    const float normalization =
+        1.0f / (static_cast<float>(params.photonEmissions) * choice);
+
+    if (light->type == 4U) {
+        const auto source = sampleEnvironment(rng);
+        photon.direction = -source.direction;
+        photon.origin = params.sceneCenter -
+            photon.direction * params.sceneRadius +
+            diskOffset(photon.direction, params.sceneRadius, rng);
+        photon.power = source.radiance *
+            (3.14159265f * params.sceneRadius * params.sceneRadius *
+             normalization / source.pdf);
+    } else if (light->type == 3U) {
+        const float root = sqrtf(random(rng));
+        const float u = 1.0f - root;
+        const float v = random(rng) * root;
+        photon.origin = light->a * u + light->b * v +
+                        light->c * (1.0f - u - v);
+        const float3 side = random(rng) < 0.5f ? light->normal : -light->normal;
+        photon.direction = cosineDirection(side, rng);
+        photon.origin = photon.origin + photon.direction * 0.001f;
+        photon.power = light->emission *
+            (6.2831853f * light->area * normalization);
+    } else if (light->type == 0U) {
+        photon.direction = normalize(light->b);
+        photon.origin = params.sceneCenter -
+            photon.direction * params.sceneRadius +
+            diskOffset(photon.direction, params.sceneRadius, rng);
+        photon.power = light->emission *
+            (3.14159265f * params.sceneRadius * params.sceneRadius *
+             normalization);
+    } else {
+        photon.origin = light->a;
+        if (light->type == 1U) {
+            const float outer = cosf(light->outerCone);
+            const float cosine = 1.0f - random(rng) * (1.0f - outer);
+            photon.direction = directionAround(normalize(light->b), cosine, rng);
+            const float inner = cosf(light->innerCone);
+            const float falloff =
+                saturate((cosine - outer) / fmaxf(inner - outer, 1e-5f));
+            photon.power = light->emission *
+                (6.2831853f * (1.0f - outer) * falloff * falloff *
+                 normalization);
+        } else {
+            const float cosine = 1.0f - 2.0f * random(rng);
+            photon.direction =
+                directionAround(make_float3(0.0f, 1.0f, 0.0f), cosine, rng);
+            photon.power = light->emission * (12.566371f * normalization);
+        }
+        photon.origin = photon.origin + photon.direction * 0.001f;
+    }
+    photon.valid = maximum(photon.power) > 0.0f;
+    return photon;
+}
+
+static __forceinline__ __device__ int3 photonCell(float3 position) {
+    return make_int3(
+        static_cast<int>(floorf(position.x / params.photonRadius)),
+        static_cast<int>(floorf(position.y / params.photonRadius)),
+        static_cast<int>(floorf(position.z / params.photonRadius)));
+}
+
+static __forceinline__ __device__ unsigned int photonBucket(int3 cell) {
+    const unsigned int hash =
+        static_cast<unsigned int>(cell.x) * 73856093U ^
+        static_cast<unsigned int>(cell.y) * 19349663U ^
+        static_cast<unsigned int>(cell.z) * 83492791U;
+    return hash & (params.photonBucketCount - 1U);
+}
+
+static __forceinline__ __device__ void storePhoton(
+    const Hit& hit, float3 power) {
+    const unsigned int bucket = photonBucket(photonCell(hit.position));
+    const unsigned int slot = atomicAdd(&params.photonBuckets[bucket], 1U);
+    if (slot >= params.photonBucketSize)
+        return;
+    params.photons[bucket * params.photonBucketSize + slot] =
+        {hit.position, power, hit.normal};
+}
+
+static __forceinline__ __device__ float3 causticLighting(
+    const Hit& hit, const GpuMaterial& material) {
+    const float diffuseWeight = (1.0f - material.metallic) *
+                                (1.0f - material.transmission);
+    if (params.photonRadius <= 0.0f || diffuseWeight <= 0.0f)
+        return make_float3(0.0f, 0.0f, 0.0f);
+
+    const int3 center = photonCell(hit.position);
+    const float radiusSquared = params.photonRadius * params.photonRadius;
+    float3 flux = make_float3(0.0f, 0.0f, 0.0f);
+    for (int z = -1; z <= 1; ++z) {
+        for (int y = -1; y <= 1; ++y) {
+            for (int x = -1; x <= 1; ++x) {
+                const unsigned int bucket = photonBucket(
+                    make_int3(center.x + x, center.y + y, center.z + z));
+                const unsigned int count =
+                    min(params.photonBuckets[bucket], params.photonBucketSize);
+                for (unsigned int index = 0; index < count; ++index) {
+                    const Photon photon =
+                        params.photons[bucket * params.photonBucketSize + index];
+                    const float3 offset = photon.position - hit.position;
+                    const float distanceSquared = dot(offset, offset);
+                    if (distanceSquared >= radiusSquared ||
+                        dot(photon.normal, hit.normal) < 0.7f)
+                        continue;
+                    flux += photon.power *
+                        (1.0f - distanceSquared / radiusSquared);
+                }
+            }
+        }
+    }
+    const float kernel = 2.0f /
+        (3.14159265f * radiusSquared * 3.14159265f);
+    return rgb(material.baseColor) * (diffuseWeight * kernel) * flux;
+}
+
+extern "C" __global__ void __raygen__photons() {
+    const unsigned int index = optixGetLaunchIndex().x;
+    unsigned int rng = index * 9781U + 0x9e3779b9U;
+    const PhotonEmission emission = emitPhoton(rng);
+    if (!emission.valid)
+        return;
+
+    float3 origin = emission.origin;
+    float3 direction = emission.direction;
+    float3 power = emission.power;
+    int medium = -1;
+    bool specularPath = false;
+    for (unsigned int depth = 0; depth < 10U; ++depth) {
+        Hit hit = trace(origin, direction);
+        if (!hit.found)
+            return;
+        GpuMaterial material = textured(params.materials[hit.material], hit);
+        hit.normal = mappedNormal(hit, material);
+        if (medium >= 0)
+            power *= absorption(params.materials[medium], hit.distance);
+
+        const float diffuseWeight = (1.0f - material.metallic) *
+                                    (1.0f - material.transmission);
+        if (specularPath && diffuseWeight > 0.0f) {
+            storePhoton(hit, power);
+            return;
+        }
+
+        if (material.transmission > 0.0f &&
+            random(rng) < material.transmission) {
+            float ior = material.ior;
+            if (material.dispersion > 0.0f) {
+                const unsigned int channel =
+                    static_cast<unsigned int>(random(rng) * 3.0f) % 3U;
+                const float spread =
+                    (material.ior - 1.0f) * material.dispersion * 0.5f;
+                ior += (static_cast<float>(channel) - 1.0f) * spread;
+                power *= channel == 0U ? make_float3(3.0f, 0.0f, 0.0f)
+                    : channel == 1U ? make_float3(0.0f, 3.0f, 0.0f)
+                                    : make_float3(0.0f, 0.0f, 3.0f);
+            }
+            float3 microNormal = ggxNormal(hit.normal, material.roughness, rng);
+            if (dot(-direction, microNormal) < 0.0f)
+                microNormal = -microNormal;
+            const float eta = hit.frontFace ? 1.0f / ior : ior;
+            const float cosine = fminf(dot(-direction, microNormal), 1.0f);
+            float3 transmitted;
+            if (!refract(direction, microNormal, eta, transmitted) ||
+                random(rng) < fresnel(cosine, ior)) {
+                direction = reflect(direction, microNormal);
+                origin = hit.position + hit.normal * 0.001f;
+            } else {
+                direction = normalize(transmitted);
+                origin = hit.position - hit.normal * 0.001f;
+                medium = hit.frontFace ? static_cast<int>(hit.material) : -1;
+            }
+            specularPath = true;
+            continue;
+        }
+        return;
+    }
+}
+
 extern "C" __global__ void __raygen__render() {
     const uint3 pixel = optixGetLaunchIndex();
     const unsigned int index = pixel.y * params.width + pixel.x;
@@ -552,10 +788,13 @@ extern "C" __global__ void __raygen__render() {
     float3 direction = normalize(focalPoint - origin);
     float3 throughput = make_float3(1.0f, 1.0f, 1.0f);
     float3 radiance = make_float3(0.0f, 0.0f, 0.0f);
+    float3 guideAlbedo = make_float3(0.0f, 0.0f, 0.0f);
+    float3 guideNormal = make_float3(0.0f, 0.0f, 0.0f);
     int medium = -1;
     float lastPdf = 0.0f;
     float3 lastOrigin = origin;
     bool lastDelta = true;
+    bool primaryChain = true;
 
     for (unsigned int depth = 0; depth < params.maxDepth; ++depth) {
         Hit hit = trace(origin, direction);
@@ -568,6 +807,10 @@ extern "C" __global__ void __raygen__render() {
 
         const GpuMaterial material = textured(params.materials[hit.material], hit);
         hit.normal = mappedNormal(hit, material);
+        if (depth == 0) {
+            guideAlbedo = rgb(material.baseColor);
+            guideNormal = hit.normal;
+        }
         if (medium >= 0)
             throughput *= absorption(params.materials[medium], hit.distance);
         const float lightPdf = lastDelta ? 0.0f : emissivePdf(lastOrigin, hit);
@@ -576,6 +819,8 @@ extern "C" __global__ void __raygen__render() {
         radiance += throughput * material.emissive *
                     (material.emissiveStrength * emissionWeight);
         radiance += throughput * directLighting(hit, material, rng);
+        if (primaryChain)
+            radiance += throughput * causticLighting(hit, material);
 
         const bool transmissive = material.transmission > 0.0f &&
                                   random(rng) < material.transmission;
@@ -623,6 +868,7 @@ extern "C" __global__ void __raygen__render() {
                 throughput *= f0 / probability;
             } else {
                 lastDelta = false;
+                primaryChain = false;
                 direction = cosineDirection(hit.normal, rng);
                 throughput *= color * ((1.0f - material.metallic) /
                                         (1.0f - probability));
@@ -645,8 +891,14 @@ extern "C" __global__ void __raygen__render() {
     const float4 previous = params.accumulation[index];
     const float weight = 1.0f / static_cast<float>(params.sample + 1U);
     const float3 accumulated = rgb(previous) + (radiance - rgb(previous)) * weight;
+    const float3 albedo = rgb(params.albedoGuide[index]) +
+        (guideAlbedo - rgb(params.albedoGuide[index])) * weight;
+    const float3 normal = rgb(params.normalGuide[index]) +
+        (guideNormal - rgb(params.normalGuide[index])) * weight;
     params.accumulation[index] =
         make_float4(accumulated.x, accumulated.y, accumulated.z, 1.0f);
+    params.albedoGuide[index] = make_float4(albedo.x, albedo.y, albedo.z, 1.0f);
+    params.normalGuide[index] = make_float4(normal.x, normal.y, normal.z, 1.0f);
     const float3 mapped = aces(accumulated * exp2f(params.exposure));
     params.output[index] = make_uchar4(
         static_cast<unsigned char>(mapped.x * 255.0f + 0.5f),

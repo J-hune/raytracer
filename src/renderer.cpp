@@ -13,6 +13,7 @@
 #include <climits>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -186,6 +187,8 @@ struct Renderer::Impl {
             optixDenoiserDestroy(denoiser);
         if (pipeline)
             optixPipelineDestroy(pipeline);
+        if (photonRaygen)
+            optixProgramGroupDestroy(photonRaygen);
         if (raygen)
             optixProgramGroupDestroy(raygen);
         if (miss)
@@ -218,12 +221,17 @@ struct Renderer::Impl {
         buildGeometry(scene);
         buildInstances(scene);
         buildLights(scene);
+        configureCaustics(scene);
         createPipeline();
         createBindingTable();
         accumulation.resize(static_cast<std::size_t>(width) * height * sizeof(float4));
+        albedoGuide.resize(accumulation.size());
+        normalGuide.resize(accumulation.size());
         output.resize(static_cast<std::size_t>(width) * height * sizeof(uchar4));
-        cudaCheck(cudaMemset(accumulation.data(), 0, accumulation.size()));
         configureCamera(scene.cameras.front());
+        reset();
+        if (profile == Profile::Final)
+            buildCaustics();
     }
 
     void uploadMaterials(const Scene& scene) {
@@ -479,6 +487,39 @@ struct Renderer::Impl {
         }
     }
 
+    void configureCaustics(const Scene& scene) {
+        const float limit = std::numeric_limits<float>::max();
+        float3 minimum = make_float3(limit, limit, limit);
+        float3 maximum = make_float3(-limit, -limit, -limit);
+        for (const auto& instance : scene.instances) {
+            for (const auto& vertex : scene.geometries[instance.geometry].vertices) {
+                const float3 value = point(instance.transform, vertex.position);
+                minimum = make_float3(std::min(minimum.x, value.x),
+                                      std::min(minimum.y, value.y),
+                                      std::min(minimum.z, value.z));
+                maximum = make_float3(std::max(maximum.x, value.x),
+                                      std::max(maximum.y, value.y),
+                                      std::max(maximum.z, value.z));
+            }
+        }
+        launch.sceneCenter = make_float3(
+            (minimum.x + maximum.x) * 0.5f,
+            (minimum.y + maximum.y) * 0.5f,
+            (minimum.z + maximum.z) * 0.5f);
+        launch.sceneRadius = length(difference(maximum, minimum)) * 0.525f;
+        causticRadius = std::max(launch.sceneRadius * 0.018f, 0.01f);
+        launch.photonBucketCount = 1U << 17U;
+        launch.photonBucketSize = 8U;
+        launch.photonEmissions = 1U << 20U;
+        photons.resize(static_cast<std::size_t>(launch.photonBucketCount) *
+                       launch.photonBucketSize * sizeof(Photon));
+        photonBuckets.resize(static_cast<std::size_t>(launch.photonBucketCount) *
+                             sizeof(std::uint32_t));
+        launch.photons = static_cast<Photon*>(photons.data());
+        launch.photonBuckets =
+            static_cast<std::uint32_t*>(photonBuckets.data());
+    }
+
     void createPipeline() {
         OptixModuleCompileOptions moduleOptions{};
         moduleOptions.optLevel = OPTIX_COMPILE_OPTIMIZATION_LEVEL_3;
@@ -503,10 +544,12 @@ struct Renderer::Impl {
                                      std::string(log.data(), logSize));
 
         raygen = createProgram(OPTIX_PROGRAM_GROUP_KIND_RAYGEN, "__raygen__render");
+        photonRaygen =
+            createProgram(OPTIX_PROGRAM_GROUP_KIND_RAYGEN, "__raygen__photons");
         miss = createProgram(OPTIX_PROGRAM_GROUP_KIND_MISS, "__miss__environment");
         hit = createProgram(OPTIX_PROGRAM_GROUP_KIND_HITGROUP, "__closesthit__surface");
 
-        const std::array groups{raygen, miss, hit};
+        const std::array groups{raygen, photonRaygen, miss, hit};
         OptixPipelineLinkOptions linkOptions{};
         linkOptions.maxTraceDepth = 1;
         logSize = log.size();
@@ -563,6 +606,11 @@ struct Renderer::Impl {
                    "optixSbtRecordPackHeader");
         raygenRecordBuffer.upload(&raygenRecord, sizeof(raygenRecord));
 
+        Record<Empty> photonRecord{};
+        optixCheck(optixSbtRecordPackHeader(photonRaygen, &photonRecord),
+                   "optixSbtRecordPackHeader");
+        photonRaygenRecordBuffer.upload(&photonRecord, sizeof(photonRecord));
+
         Record<Empty> missRecord{};
         optixCheck(optixSbtRecordPackHeader(miss, &missRecord),
                    "optixSbtRecordPackHeader");
@@ -614,6 +662,8 @@ struct Renderer::Impl {
         launch.width = width;
         launch.height = height;
         launch.accumulation = static_cast<float4*>(accumulation.data());
+        launch.albedoGuide = static_cast<float4*>(albedoGuide.data());
+        launch.normalGuide = static_cast<float4*>(normalGuide.data());
         launch.materials = reinterpret_cast<const GpuMaterial*>(materials.device());
         launch.textures = reinterpret_cast<const GpuTexture*>(textures.device());
         launch.scene = sceneHandle;
@@ -622,6 +672,8 @@ struct Renderer::Impl {
 
     void reset() {
         cudaCheck(cudaMemset(accumulation.data(), 0, accumulation.size()));
+        cudaCheck(cudaMemset(albedoGuide.data(), 0, albedoGuide.size()));
+        cudaCheck(cudaMemset(normalGuide.data(), 0, normalGuide.size()));
         sample = 0;
         denoisedReady = false;
     }
@@ -633,7 +685,29 @@ struct Renderer::Impl {
 
     void setProfile(Profile profile) {
         launch.maxDepth = profile == Profile::Final ? 12U : 5U;
+        if (profile == Profile::Final)
+            buildCaustics();
+        else
+            launch.photonRadius = 0.0f;
         reset();
+    }
+
+    void buildCaustics() {
+        launch.photonRadius = causticRadius;
+        if (causticsReady)
+            return;
+        cudaCheck(cudaMemset(photonBuckets.data(), 0, photonBuckets.size()));
+        cudaCheck(cudaMemcpy(parameters.data(), &launch, sizeof(launch),
+                             cudaMemcpyHostToDevice));
+        const auto record = bindingTable.raygenRecord;
+        bindingTable.raygenRecord = photonRaygenRecordBuffer.device();
+        const auto result = optixLaunch(
+            pipeline, nullptr, parameters.device(), sizeof(launch), &bindingTable,
+            launch.photonEmissions, 1, 1);
+        bindingTable.raygenRecord = record;
+        optixCheck(result, "optixLaunch");
+        cudaCheck(cudaDeviceSynchronize());
+        causticsReady = true;
     }
 
     void render(void* output) {
@@ -659,8 +733,10 @@ struct Renderer::Impl {
     void denoiseImage() {
         if (!denoiser) {
             OptixDenoiserOptions options{};
+            options.guideAlbedo = 1;
+            options.guideNormal = 1;
             options.denoiseAlpha = OPTIX_DENOISER_ALPHA_MODE_COPY;
-            optixCheck(optixDenoiserCreate(context, OPTIX_DENOISER_MODEL_KIND_HDR,
+            optixCheck(optixDenoiserCreate(context, OPTIX_DENOISER_MODEL_KIND_AOV,
                                            &options, &denoiser),
                        "optixDenoiserCreate");
             OptixDenoiserSizes sizes{};
@@ -670,9 +746,9 @@ struct Renderer::Impl {
             denoiserState.resize(sizes.stateSizeInBytes);
             denoiserScratch.resize(std::max(
                 sizes.withoutOverlapScratchSizeInBytes,
-                sizes.computeIntensitySizeInBytes));
+                sizes.computeAverageColorSizeInBytes));
             denoised.resize(accumulation.size());
-            denoiserIntensity.resize(sizeof(float));
+            denoiserAverageColor.resize(3 * sizeof(float));
             optixCheck(optixDenoiserSetup(
                            denoiser, nullptr, width, height, denoiserState.device(),
                            denoiserState.size(), denoiserScratch.device(),
@@ -681,13 +757,15 @@ struct Renderer::Impl {
         }
 
         const auto input = image(accumulation.device());
-        optixCheck(optixDenoiserComputeIntensity(
-                       denoiser, nullptr, &input, denoiserIntensity.device(),
+        optixCheck(optixDenoiserComputeAverageColor(
+                       denoiser, nullptr, &input, denoiserAverageColor.device(),
                        denoiserScratch.device(), denoiserScratch.size()),
-                   "optixDenoiserComputeIntensity");
+                   "optixDenoiserComputeAverageColor");
         OptixDenoiserParams denoiserParams{};
-        denoiserParams.hdrIntensity = denoiserIntensity.device();
+        denoiserParams.hdrAverageColor = denoiserAverageColor.device();
         OptixDenoiserGuideLayer guides{};
+        guides.albedo = image(albedoGuide.device());
+        guides.normal = image(normalGuide.device());
         OptixDenoiserLayer layer{};
         layer.input = input;
         layer.output = image(denoised.device());
@@ -734,6 +812,7 @@ struct Renderer::Impl {
     OptixDeviceContext context = nullptr;
     OptixModule module = nullptr;
     OptixProgramGroup raygen = nullptr;
+    OptixProgramGroup photonRaygen = nullptr;
     OptixProgramGroup miss = nullptr;
     OptixProgramGroup hit = nullptr;
     OptixDenoiser denoiser = nullptr;
@@ -750,18 +829,25 @@ struct Renderer::Impl {
     Buffer environmentCdf;
     Buffer acceleration;
     Buffer accumulation;
+    Buffer albedoGuide;
+    Buffer normalGuide;
     Buffer output;
     Buffer denoised;
     Buffer denoiserState;
     Buffer denoiserScratch;
-    Buffer denoiserIntensity;
+    Buffer denoiserAverageColor;
     Buffer parameters;
     Buffer raygenRecordBuffer;
     Buffer missRecordBuffer;
     Buffer hitRecordBuffer;
+    Buffer photonRaygenRecordBuffer;
+    Buffer photons;
+    Buffer photonBuckets;
     LaunchParams launch{};
     float environmentPower = 0.0f;
+    float causticRadius = 0.0f;
     bool denoisedReady = false;
+    bool causticsReady = false;
 };
 
 Renderer::Renderer(const Scene& scene, std::uint32_t width, std::uint32_t height,

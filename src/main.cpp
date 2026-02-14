@@ -19,13 +19,14 @@ struct Options {
     std::uint32_t samples = 32;
     bool profileSet = false;
     bool samplesSet = false;
+    bool denoise = true;
 };
 
 Options options(int argc, char** argv) {
     if (argc < 2)
         throw std::runtime_error(
             "usage: raytracer <scene.gltf|scene.glb> [--profile preview|final] "
-            "[--output image.png] [--samples count]");
+            "[--output image.png] [--samples count] [--denoise on|off]");
 
     Options result;
     result.scene = argv[1];
@@ -52,6 +53,14 @@ Options options(int argc, char** argv) {
                 result.samples == 0)
                 throw std::runtime_error("Invalid sample count");
             result.samplesSet = true;
+        } else if (name == "--denoise") {
+            const std::string_view value = argv[index + 1];
+            if (value == "on")
+                result.denoise = true;
+            else if (value == "off")
+                result.denoise = false;
+            else
+                throw std::runtime_error("Expected on or off for denoise");
         } else {
             throw std::runtime_error("Unknown option: " + std::string(name));
         }
@@ -94,7 +103,7 @@ int main(int argc, char** argv) {
         if (arguments.output) {
             while (renderer.samples() < arguments.samples)
                 renderer.render();
-            if (arguments.profile == rt::Profile::Final)
+            if (arguments.profile == rt::Profile::Final && arguments.denoise)
                 renderer.denoise();
             if (arguments.output->extension() == ".exr")
                 rt::writeExr(*arguments.output, width, height,

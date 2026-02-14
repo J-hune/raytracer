@@ -5,7 +5,9 @@ application only loads, displays and renders the exported scene.
 
 Geometry traversal, path integration, temporal accumulation and tone mapping
 run on the GPU through CUDA and OptiX. The display buffer is shared directly
-with OpenGL, without copying rendered pixels through the CPU.
+with OpenGL, without copying rendered pixels through the CPU. Final renders
+add a GPU photon map for transmitted caustics and guide OptiX denoising with
+the accumulated albedo and world-space normal buffers.
 
 ## Scene format
 
@@ -69,6 +71,8 @@ renders use the same profiles:
 ```sh
 ./build/bin/raytracer scene.glb --output render.png
 ./build/bin/raytracer scene.glb --profile final --samples 1024 --output render.exr
+./build/bin/raytracer scene.glb --profile final --samples 256 --denoise off \
+    --output raw.png
 ```
 
 The PNG is denoised and tone mapped. The EXR keeps denoised scene-linear HDR
