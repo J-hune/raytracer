@@ -79,6 +79,18 @@ The PNG is denoised and tone mapped. The EXR keeps denoised scene-linear HDR
 values. fastgltf `v0.9.0`, OptiX `v9.0.0`, stb and TinyEXR are fetched at
 pinned revisions.
 
+## Scenes
+
+- `studio_validation.glb` exercises every supported material and texture path;
+- `glass_gallery.glb` is a dense glass, brass and ceramic composition;
+- `bubble_study.glb` focuses on transparent forms, depth of field and caustics.
+
+Each GLB is paired with its editable Blender source.
+
+![Glass gallery](img/github/glass_gallery.png)
+
+![Bubble study](img/github/bubble_study.png)
+
 ## Previous renders
 
 Images produced by the original CPU renderer remain in [`img/github`](img/github).
