@@ -1,6 +1,7 @@
 #include "renderer.hpp"
 
 #include "gpu_shared.hpp"
+#include "photon_grid.hpp"
 
 #include <cuda_runtime.h>
 #include <optix_function_table_definition.h>
@@ -165,6 +166,15 @@ float luminance(float3 value) {
     return 0.2126f * value.x + 0.7152f * value.y + 0.0722f * value.z;
 }
 
+// Gather radius as a fraction of the scene radius. The grid stores every photon
+// it is given, so this can stay tight enough to keep caustic detail; widening it
+// trades sharpness for lower variance.
+constexpr float CausticRadiusFactor = 0.0025f;
+
+// Camera samples between two photon map builds. Each build reseeds, so the
+// running average over samples also averages over independent photon maps.
+constexpr std::uint32_t PhotonRebuildInterval = 4U;
+
 }
 
 struct Renderer::Impl {
@@ -203,11 +213,16 @@ struct Renderer::Impl {
 
     void initialize(const Scene& scene, std::uint32_t renderWidth,
                     std::uint32_t renderHeight, Profile profile) {
-        if (scene.instances.empty() || scene.cameras.empty())
-            throw std::runtime_error("The scene needs geometry and a perspective camera");
+        if (scene.instances.empty())
+            throw std::runtime_error("The scene has no geometry");
+        if (scene.cameras.empty())
+            throw std::runtime_error(
+                "The scene has no perspective camera. Blender's File > Export > glTF "
+                "leaves Cameras unchecked by default; use the Raytracer panel's "
+                "Export GLB instead");
         width = renderWidth;
         height = renderHeight;
-        launch.maxDepth = profile == Profile::Final ? 12U : 5U;
+        launch.maxDepth = profile == Profile::Final ? 32U : 5U;
 
         cudaCheck(cudaFree(nullptr));
         optixCheck(optixInit(), "optixInit");
@@ -225,13 +240,15 @@ struct Renderer::Impl {
         createPipeline();
         createBindingTable();
         accumulation.resize(static_cast<std::size_t>(width) * height * sizeof(float4));
+        diffuse.resize(accumulation.size());
+        reflection.resize(accumulation.size());
+        refraction.resize(accumulation.size());
         albedoGuide.resize(accumulation.size());
         normalGuide.resize(accumulation.size());
         output.resize(static_cast<std::size_t>(width) * height * sizeof(uchar4));
         configureCamera(scene.cameras.front());
         reset();
-        if (profile == Profile::Final)
-            buildCaustics();
+        launch.photonRadius = profile == Profile::Final ? causticRadius : 0.0f;
     }
 
     void uploadMaterials(const Scene& scene) {
@@ -507,17 +524,25 @@ struct Renderer::Impl {
             (minimum.y + maximum.y) * 0.5f,
             (minimum.z + maximum.z) * 0.5f);
         launch.sceneRadius = length(difference(maximum, minimum)) * 0.525f;
-        causticRadius = std::max(launch.sceneRadius * 0.018f, 0.01f);
-        launch.photonBucketCount = 1U << 17U;
-        launch.photonBucketSize = 8U;
-        launch.photonEmissions = 1U << 20U;
-        photons.resize(static_cast<std::size_t>(launch.photonBucketCount) *
-                       launch.photonBucketSize * sizeof(Photon));
-        photonBuckets.resize(static_cast<std::size_t>(launch.photonBucketCount) *
-                             sizeof(std::uint32_t));
+        causticRadius = std::max(launch.sceneRadius * CausticRadiusFactor, 0.002f);
+        launch.photonBucketCount = 1U << 20U;
+        launch.photonCapacity = 1U << 21U;
+        launch.photonEmissions = 1U << 21U;
+
+        const auto counterBytes =
+            static_cast<std::size_t>(launch.photonBucketCount + 1U) *
+            sizeof(std::uint32_t);
+        photons.resize(static_cast<std::size_t>(launch.photonCapacity) * sizeof(Photon));
+        sortedPhotons.resize(photons.size());
+        photonCellCounts.resize(counterBytes);
+        photonCellStart.resize(counterBytes);
+        photonCounter.resize(sizeof(std::uint32_t));
+        photonScan.resize(photonScanStorage(launch.photonBucketCount));
         launch.photons = static_cast<Photon*>(photons.data());
-        launch.photonBuckets =
-            static_cast<std::uint32_t*>(photonBuckets.data());
+        launch.photonCount = static_cast<std::uint32_t*>(photonCounter.data());
+        launch.sortedPhotons = static_cast<const Photon*>(sortedPhotons.data());
+        launch.photonCellStart =
+            static_cast<const std::uint32_t*>(photonCellStart.data());
     }
 
     void createPipeline() {
@@ -662,6 +687,9 @@ struct Renderer::Impl {
         launch.width = width;
         launch.height = height;
         launch.accumulation = static_cast<float4*>(accumulation.data());
+        launch.diffuse = static_cast<float4*>(diffuse.data());
+        launch.reflection = static_cast<float4*>(reflection.data());
+        launch.refraction = static_cast<float4*>(refraction.data());
         launch.albedoGuide = static_cast<float4*>(albedoGuide.data());
         launch.normalGuide = static_cast<float4*>(normalGuide.data());
         launch.materials = reinterpret_cast<const GpuMaterial*>(materials.device());
@@ -672,6 +700,9 @@ struct Renderer::Impl {
 
     void reset() {
         cudaCheck(cudaMemset(accumulation.data(), 0, accumulation.size()));
+        cudaCheck(cudaMemset(diffuse.data(), 0, diffuse.size()));
+        cudaCheck(cudaMemset(reflection.data(), 0, reflection.size()));
+        cudaCheck(cudaMemset(refraction.data(), 0, refraction.size()));
         cudaCheck(cudaMemset(albedoGuide.data(), 0, albedoGuide.size()));
         cudaCheck(cudaMemset(normalGuide.data(), 0, normalGuide.size()));
         sample = 0;
@@ -684,19 +715,13 @@ struct Renderer::Impl {
     }
 
     void setProfile(Profile profile) {
-        launch.maxDepth = profile == Profile::Final ? 12U : 5U;
-        if (profile == Profile::Final)
-            buildCaustics();
-        else
-            launch.photonRadius = 0.0f;
+        launch.maxDepth = profile == Profile::Final ? 32U : 5U;
+        launch.photonRadius = profile == Profile::Final ? causticRadius : 0.0f;
         reset();
     }
 
     void buildCaustics() {
-        launch.photonRadius = causticRadius;
-        if (causticsReady)
-            return;
-        cudaCheck(cudaMemset(photonBuckets.data(), 0, photonBuckets.size()));
+        cudaCheck(cudaMemset(photonCounter.data(), 0, photonCounter.size()));
         cudaCheck(cudaMemcpy(parameters.data(), &launch, sizeof(launch),
                              cudaMemcpyHostToDevice));
         const auto record = bindingTable.raygenRecord;
@@ -707,11 +732,29 @@ struct Renderer::Impl {
         bindingTable.raygenRecord = record;
         optixCheck(result, "optixLaunch");
         cudaCheck(cudaDeviceSynchronize());
-        causticsReady = true;
+
+        // The tracer appends past the capacity without writing, so clamp before
+        // treating the counter as a photon count.
+        std::uint32_t stored = 0;
+        cudaCheck(cudaMemcpy(&stored, photonCounter.data(), sizeof(stored),
+                             cudaMemcpyDeviceToHost));
+        stored = std::min(stored, launch.photonCapacity);
+        cudaCheck(buildPhotonGrid(
+            static_cast<const Photon*>(photons.data()), stored, causticRadius,
+            launch.photonBucketCount,
+            static_cast<std::uint32_t*>(photonCellCounts.data()),
+            static_cast<std::uint32_t*>(photonCellStart.data()), photonScan.data(),
+            photonScan.size(), static_cast<Photon*>(sortedPhotons.data())));
+        ++launch.photonPass;
     }
 
     void render(void* output) {
+        if (launch.photonRadius > 0.0f && sample % PhotonRebuildInterval == 0U)
+            buildCaustics();
         launch.display = nullptr;
+        launch.display2 = nullptr;
+        launch.display3 = nullptr;
+        launch.composite = nullptr;
         launch.output = static_cast<uchar4*>(output ? output : this->output.data());
         launch.sample = sample;
         cudaCheck(cudaMemcpy(parameters.data(), &launch, sizeof(launch),
@@ -721,6 +764,7 @@ struct Renderer::Impl {
                    "optixLaunch");
         cudaCheck(cudaGetLastError());
         ++sample;
+        denoisedReady = false;
     }
 
     OptixImage2D image(CUdeviceptr data) const {
@@ -748,6 +792,10 @@ struct Renderer::Impl {
                 sizes.withoutOverlapScratchSizeInBytes,
                 sizes.computeAverageColorSizeInBytes));
             denoised.resize(accumulation.size());
+            denoisedDiffuse.resize(accumulation.size());
+            denoisedReflection.resize(accumulation.size());
+            denoisedRefraction.resize(accumulation.size());
+            denoisedComposite.resize(accumulation.size());
             denoiserAverageColor.resize(3 * sizeof(float));
             optixCheck(optixDenoiserSetup(
                            denoiser, nullptr, width, height, denoiserState.device(),
@@ -766,16 +814,29 @@ struct Renderer::Impl {
         OptixDenoiserGuideLayer guides{};
         guides.albedo = image(albedoGuide.device());
         guides.normal = image(normalGuide.device());
-        OptixDenoiserLayer layer{};
-        layer.input = input;
-        layer.output = image(denoised.device());
+        std::array<OptixDenoiserLayer, 4> layers{};
+        layers[0].input = input;
+        layers[0].output = image(denoised.device());
+        layers[0].type = OPTIX_DENOISER_AOV_TYPE_BEAUTY;
+        layers[1].input = image(diffuse.device());
+        layers[1].output = image(denoisedDiffuse.device());
+        layers[1].type = OPTIX_DENOISER_AOV_TYPE_DIFFUSE;
+        layers[2].input = image(reflection.device());
+        layers[2].output = image(denoisedReflection.device());
+        layers[2].type = OPTIX_DENOISER_AOV_TYPE_REFLECTION;
+        layers[3].input = image(refraction.device());
+        layers[3].output = image(denoisedRefraction.device());
+        layers[3].type = OPTIX_DENOISER_AOV_TYPE_REFRACTION;
         optixCheck(optixDenoiserInvoke(
                        denoiser, nullptr, &denoiserParams, denoiserState.device(),
-                       denoiserState.size(), &guides, &layer, 1, 0, 0,
+                       denoiserState.size(), &guides, layers.data(), layers.size(), 0, 0,
                        denoiserScratch.device(), denoiserScratch.size()),
                    "optixDenoiserInvoke");
 
-        launch.display = static_cast<const float4*>(denoised.data());
+        launch.display = static_cast<const float4*>(denoisedDiffuse.data());
+        launch.display2 = static_cast<const float4*>(denoisedReflection.data());
+        launch.display3 = static_cast<const float4*>(denoisedRefraction.data());
+        launch.composite = static_cast<float4*>(denoisedComposite.data());
         launch.output = static_cast<uchar4*>(output.data());
         cudaCheck(cudaMemcpy(parameters.data(), &launch, sizeof(launch),
                              cudaMemcpyHostToDevice));
@@ -799,7 +860,7 @@ struct Renderer::Impl {
     }
 
     std::vector<float> linearPixels() const {
-        const Buffer& source = denoisedReady ? denoised : accumulation;
+        const Buffer& source = denoisedReady ? denoisedComposite : accumulation;
         std::vector<float> result(source.size() / sizeof(float));
         cudaCheck(cudaMemcpy(result.data(), source.data(), source.size(),
                              cudaMemcpyDeviceToHost));
@@ -829,10 +890,17 @@ struct Renderer::Impl {
     Buffer environmentCdf;
     Buffer acceleration;
     Buffer accumulation;
+    Buffer diffuse;
+    Buffer reflection;
+    Buffer refraction;
     Buffer albedoGuide;
     Buffer normalGuide;
     Buffer output;
     Buffer denoised;
+    Buffer denoisedDiffuse;
+    Buffer denoisedReflection;
+    Buffer denoisedRefraction;
+    Buffer denoisedComposite;
     Buffer denoiserState;
     Buffer denoiserScratch;
     Buffer denoiserAverageColor;
@@ -842,12 +910,15 @@ struct Renderer::Impl {
     Buffer hitRecordBuffer;
     Buffer photonRaygenRecordBuffer;
     Buffer photons;
-    Buffer photonBuckets;
+    Buffer sortedPhotons;
+    Buffer photonCellCounts;
+    Buffer photonCellStart;
+    Buffer photonCounter;
+    Buffer photonScan;
     LaunchParams launch{};
     float environmentPower = 0.0f;
     float causticRadius = 0.0f;
     bool denoisedReady = false;
-    bool causticsReady = false;
 };
 
 Renderer::Renderer(const Scene& scene, std::uint32_t width, std::uint32_t height,

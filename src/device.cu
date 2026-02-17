@@ -1,4 +1,5 @@
 #include "gpu_shared.hpp"
+#include "photon_hash.cuh"
 
 #include <optix_device.h>
 
@@ -50,6 +51,10 @@ static __forceinline__ __device__ void operator+=(float3& a, float3 b) {
 
 static __forceinline__ __device__ void operator*=(float3& a, float3 b) {
     a = a * b;
+}
+
+static __forceinline__ __device__ void operator*=(float3& value, float scalar) {
+    value = value * scalar;
 }
 
 static __forceinline__ __device__ void operator/=(float3& value, float scalar) {
@@ -212,6 +217,15 @@ static __forceinline__ __device__ void* unpackPointer() {
     return reinterpret_cast<void*>(value);
 }
 
+static __forceinline__ __device__ unsigned int seeded(unsigned int a, unsigned int b) {
+    unsigned int value = a * 0x9e3779b9U ^ b * 0x85ebca6bU;
+    value ^= value >> 16U;
+    value *= 0x7feb352dU;
+    value ^= value >> 15U;
+    value *= 0x846ca68bU;
+    return value ^ (value >> 16U);
+}
+
 static __forceinline__ __device__ float random(unsigned int& state) {
     state = state * 747796405U + 2891336453U;
     const auto word = ((state >> ((state >> 28U) + 4U)) ^ state) * 277803737U;
@@ -271,25 +285,78 @@ static __forceinline__ __device__ float3 cosineDirection(float3 normal,
                      bitangent * (radius * sinf(phi)) + normal * z);
 }
 
-static __forceinline__ __device__ float3 ggxNormal(float3 normal, float roughness,
-                                                   unsigned int& rng) {
-    const float alpha = fmaxf(roughness * roughness, 0.001f);
-    const float phi = 6.2831853f * random(rng);
-    const float sample = random(rng);
-    const float cosine = sqrtf((1.0f - sample) /
-                               (1.0f + (alpha * alpha - 1.0f) * sample));
-    const float sine = sqrtf(fmaxf(0.0f, 1.0f - cosine * cosine));
+static __forceinline__ __device__ float roughnessAlpha(float roughness) {
+    return fmaxf(roughness * roughness, 1e-4f);
+}
+
+// Heitz, "Sampling the GGX Distribution of Visible Normals". Sampling the
+// visible lobe rather than the full NDF keeps the microfacet in front of the
+// viewer and reduces the weight to the masking ratio below.
+static __forceinline__ __device__ float3 ggxNormal(float3 view, float3 normal,
+                                                   float alpha, unsigned int& rng) {
     const float3 tangent = normalize(fabsf(normal.x) > 0.5f
         ? cross(make_float3(0.0f, 1.0f, 0.0f), normal)
         : cross(make_float3(1.0f, 0.0f, 0.0f), normal));
-    return normalize(tangent * (sine * cosf(phi)) +
-                     cross(normal, tangent) * (sine * sinf(phi)) + normal * cosine);
+    const float3 bitangent = cross(normal, tangent);
+    const float3 local = make_float3(dot(view, tangent), dot(view, bitangent),
+                                     dot(view, normal));
+
+    const float3 stretched =
+        normalize(make_float3(alpha * local.x, alpha * local.y, local.z));
+    const float lengthSquared =
+        stretched.x * stretched.x + stretched.y * stretched.y;
+    const float3 basisX = lengthSquared > 0.0f
+        ? make_float3(-stretched.y, stretched.x, 0.0f) / sqrtf(lengthSquared)
+        : make_float3(1.0f, 0.0f, 0.0f);
+    const float3 basisY = cross(stretched, basisX);
+
+    const float radius = sqrtf(random(rng));
+    const float phi = 6.2831853f * random(rng);
+    const float x = radius * cosf(phi);
+    float y = radius * sinf(phi);
+    const float lerp = 0.5f * (1.0f + stretched.z);
+    y = (1.0f - lerp) * sqrtf(fmaxf(0.0f, 1.0f - x * x)) + lerp * y;
+
+    const float3 hemisphere = basisX * x + basisY * y +
+        stretched * sqrtf(fmaxf(0.0f, 1.0f - x * x - y * y));
+    const float3 micro = normalize(make_float3(
+        alpha * hemisphere.x, alpha * hemisphere.y, fmaxf(0.0f, hemisphere.z)));
+    return normalize(tangent * micro.x + bitangent * micro.y + normal * micro.z);
+}
+
+static __forceinline__ __device__ float smithLambda(float cosine, float alpha) {
+    const float squared = cosine * cosine;
+    const float tangentSquared = fmaxf(1.0f - squared, 0.0f) / fmaxf(squared, 1e-8f);
+    return 0.5f * (sqrtf(1.0f + alpha * alpha * tangentSquared) - 1.0f);
+}
+
+// G2 / G1, the only term left in the throughput once the visible normals have
+// been sampled. It is what puts the shadowing back into rough reflections.
+static __forceinline__ __device__ float maskingRatio(float viewCosine,
+                                                     float lightCosine, float alpha) {
+    const float view = smithLambda(viewCosine, alpha);
+    return (1.0f + view) / (1.0f + view + smithLambda(lightCosine, alpha));
 }
 
 static __forceinline__ __device__ float fresnel(float cosine, float ior) {
     const float r = (1.0f - ior) / (1.0f + ior);
     const float r2 = r * r;
-    return r2 + (1.0f - r2) * powf(1.0f - cosine, 5.0f);
+    return r2 + (1.0f - r2) * powf(fmaxf(1.0f - cosine, 0.0f), 5.0f);
+}
+
+static __forceinline__ __device__ float3 schlick(float3 f0, float cosine) {
+    const float scale = powf(fmaxf(1.0f - cosine, 0.0f), 5.0f);
+    return make_float3(f0.x + (1.0f - f0.x) * scale,
+                       f0.y + (1.0f - f0.y) * scale,
+                       f0.z + (1.0f - f0.z) * scale);
+}
+
+static __forceinline__ __device__ float3 baseReflectance(
+    const GpuMaterial& material) {
+    const float3 color = rgb(material.baseColor);
+    return make_float3(0.04f + (color.x - 0.04f) * material.metallic,
+                       0.04f + (color.y - 0.04f) * material.metallic,
+                       0.04f + (color.z - 0.04f) * material.metallic);
 }
 
 static __forceinline__ __device__ float3 absorption(const GpuMaterial& material,
@@ -337,13 +404,14 @@ static __forceinline__ __device__ float powerHeuristic(float a, float b) {
     return a2 / fmaxf(a2 + b2, 1e-12f);
 }
 
+// Tracking the view-dependent Fresnel keeps the lobe choice proportional to the
+// energy each lobe actually carries, so grazing angles do not turn into a rare
+// draw weighted by a huge factor.
 static __forceinline__ __device__ float specularProbability(
-    const GpuMaterial& material) {
-    const float3 color = rgb(material.baseColor);
-    return fminf(fmaxf(maximum(make_float3(
-        0.04f + (color.x - 0.04f) * material.metallic,
-        0.04f + (color.y - 0.04f) * material.metallic,
-        0.04f + (color.z - 0.04f) * material.metallic)), 0.05f), 0.95f);
+    const GpuMaterial& material, float3 view, float3 normal) {
+    const float3 reflectance =
+        schlick(baseReflectance(material), fmaxf(dot(view, normal), 0.0f));
+    return fminf(fmaxf(maximum(reflectance), 0.05f), 0.95f);
 }
 
 struct LightSample {
@@ -512,7 +580,7 @@ static __forceinline__ __device__ float environmentPdf(float3 direction) {
 }
 
 static __forceinline__ __device__ float3 directLighting(
-    const Hit& hit, const GpuMaterial& material, unsigned int& rng) {
+    const Hit& hit, const GpuMaterial& material, float3 view, unsigned int& rng) {
     const float diffuseWeight = (1.0f - material.metallic) *
                                 (1.0f - material.transmission);
     if (diffuseWeight <= 0.0f)
@@ -523,9 +591,17 @@ static __forceinline__ __device__ float3 directLighting(
     if (!light.valid || cosine <= 0.0f || !visible(hit.position, hit.normal, light))
         return make_float3(0.0f, 0.0f, 0.0f);
 
-    const float3 bsdf = rgb(material.baseColor) * (diffuseWeight / 3.14159265f);
+    // The same (1 - F) split the path tracer applies when it picks the diffuse
+    // lobe, so next event estimation and BSDF sampling agree and MIS stays sound.
+    const float3 reflectance =
+        schlick(baseReflectance(material), fmaxf(dot(view, hit.normal), 0.0f));
+    const float3 diffuse = make_float3(1.0f - reflectance.x, 1.0f - reflectance.y,
+                                       1.0f - reflectance.z);
+    const float3 bsdf =
+        rgb(material.baseColor) * diffuse * (diffuseWeight / 3.14159265f);
     const float bsdfPdf = (1.0f - material.transmission) *
-        (1.0f - specularProbability(material)) * cosine / 3.14159265f;
+        (1.0f - specularProbability(material, view, hit.normal)) * cosine /
+        3.14159265f;
     const float weight = light.delta ? 1.0f : powerHeuristic(light.pdf, bsdfPdf);
     return bsdf * light.radiance * (cosine * weight / light.pdf);
 }
@@ -637,29 +713,12 @@ static __forceinline__ __device__ PhotonEmission emitPhoton(
     return photon;
 }
 
-static __forceinline__ __device__ int3 photonCell(float3 position) {
-    return make_int3(
-        static_cast<int>(floorf(position.x / params.photonRadius)),
-        static_cast<int>(floorf(position.y / params.photonRadius)),
-        static_cast<int>(floorf(position.z / params.photonRadius)));
-}
-
-static __forceinline__ __device__ unsigned int photonBucket(int3 cell) {
-    const unsigned int hash =
-        static_cast<unsigned int>(cell.x) * 73856093U ^
-        static_cast<unsigned int>(cell.y) * 19349663U ^
-        static_cast<unsigned int>(cell.z) * 83492791U;
-    return hash & (params.photonBucketCount - 1U);
-}
-
 static __forceinline__ __device__ void storePhoton(
     const Hit& hit, float3 power) {
-    const unsigned int bucket = photonBucket(photonCell(hit.position));
-    const unsigned int slot = atomicAdd(&params.photonBuckets[bucket], 1U);
-    if (slot >= params.photonBucketSize)
+    const unsigned int slot = atomicAdd(params.photonCount, 1U);
+    if (slot >= params.photonCapacity)
         return;
-    params.photons[bucket * params.photonBucketSize + slot] =
-        {hit.position, power, hit.normal};
+    params.photons[slot] = {hit.position, power, hit.normal};
 }
 
 static __forceinline__ __device__ float3 causticLighting(
@@ -669,19 +728,19 @@ static __forceinline__ __device__ float3 causticLighting(
     if (params.photonRadius <= 0.0f || diffuseWeight <= 0.0f)
         return make_float3(0.0f, 0.0f, 0.0f);
 
-    const int3 center = photonCell(hit.position);
+    const int3 center = photonCell(hit.position, params.photonRadius);
     const float radiusSquared = params.photonRadius * params.photonRadius;
     float3 flux = make_float3(0.0f, 0.0f, 0.0f);
     for (int z = -1; z <= 1; ++z) {
         for (int y = -1; y <= 1; ++y) {
             for (int x = -1; x <= 1; ++x) {
                 const unsigned int bucket = photonBucket(
-                    make_int3(center.x + x, center.y + y, center.z + z));
-                const unsigned int count =
-                    min(params.photonBuckets[bucket], params.photonBucketSize);
-                for (unsigned int index = 0; index < count; ++index) {
-                    const Photon photon =
-                        params.photons[bucket * params.photonBucketSize + index];
+                    make_int3(center.x + x, center.y + y, center.z + z),
+                    params.photonBucketCount);
+                const unsigned int end = params.photonCellStart[bucket + 1U];
+                for (unsigned int index = params.photonCellStart[bucket];
+                     index < end; ++index) {
+                    const Photon photon = params.sortedPhotons[index];
                     const float3 offset = photon.position - hit.position;
                     const float distanceSquared = dot(offset, offset);
                     if (distanceSquared >= radiusSquared ||
@@ -700,7 +759,9 @@ static __forceinline__ __device__ float3 causticLighting(
 
 extern "C" __global__ void __raygen__photons() {
     const unsigned int index = optixGetLaunchIndex().x;
-    unsigned int rng = index * 9781U + 0x9e3779b9U;
+    // Every pass reseeds so that repeated builds explore different photon paths
+    // and the caustic keeps converging as camera samples accumulate.
+    unsigned int rng = seeded(index, params.photonPass);
     const PhotonEmission emission = emitPhoton(rng);
     if (!emission.valid)
         return;
@@ -739,21 +800,34 @@ extern "C" __global__ void __raygen__photons() {
                     : channel == 1U ? make_float3(0.0f, 3.0f, 0.0f)
                                     : make_float3(0.0f, 0.0f, 3.0f);
             }
-            float3 microNormal = ggxNormal(hit.normal, material.roughness, rng);
-            if (dot(-direction, microNormal) < 0.0f)
-                microNormal = -microNormal;
+            const float3 view = -direction;
+            const float alpha = roughnessAlpha(material.roughness);
+            const float3 microNormal = ggxNormal(view, hit.normal, alpha, rng);
             const float eta = hit.frontFace ? 1.0f / ior : ior;
-            const float cosine = fminf(dot(-direction, microNormal), 1.0f);
+            const float cosine = fminf(fmaxf(dot(view, microNormal), 0.0f), 1.0f);
             float3 transmitted;
-            if (!refract(direction, microNormal, eta, transmitted) ||
-                random(rng) < fresnel(cosine, ior)) {
+            const bool totalReflection =
+                !refract(direction, microNormal, eta, transmitted);
+            float reflectance = 1.0f;
+            if (!totalReflection) {
+                transmitted = normalize(transmitted);
+                reflectance = fresnel(
+                    eta > 1.0f ? fabsf(dot(transmitted, microNormal)) : cosine, ior);
+            }
+
+            const float viewCosine = fabsf(dot(view, hit.normal));
+            if (totalReflection || random(rng) < reflectance) {
                 direction = reflect(direction, microNormal);
+                if (dot(direction, hit.normal) <= 0.0f)
+                    return;
                 origin = hit.position + hit.normal * 0.001f;
             } else {
-                direction = normalize(transmitted);
+                direction = transmitted;
                 origin = hit.position - hit.normal * 0.001f;
                 medium = hit.frontFace ? static_cast<int>(hit.material) : -1;
             }
+            power *= maskingRatio(viewCosine,
+                                  fabsf(dot(direction, hit.normal)), alpha);
             specularPath = true;
             continue;
         }
@@ -765,8 +839,14 @@ extern "C" __global__ void __raygen__render() {
     const uint3 pixel = optixGetLaunchIndex();
     const unsigned int index = pixel.y * params.width + pixel.x;
     if (params.display) {
-        const float3 mapped =
-            aces(rgb(params.display[index]) * exp2f(params.exposure));
+        float3 color = rgb(params.display[index]);
+        if (params.display2)
+            color += rgb(params.display2[index]);
+        if (params.display3)
+            color += rgb(params.display3[index]);
+        if (params.composite)
+            params.composite[index] = make_float4(color.x, color.y, color.z, 1.0f);
+        const float3 mapped = aces(color * exp2f(params.exposure));
         params.output[index] = make_uchar4(
             static_cast<unsigned char>(mapped.x * 255.0f + 0.5f),
             static_cast<unsigned char>(mapped.y * 255.0f + 0.5f),
@@ -787,40 +867,60 @@ extern "C" __global__ void __raygen__render() {
     float3 origin = params.eye + lensSample(rng);
     float3 direction = normalize(focalPoint - origin);
     float3 throughput = make_float3(1.0f, 1.0f, 1.0f);
-    float3 radiance = make_float3(0.0f, 0.0f, 0.0f);
+    float3 radiance[3] = {};
     float3 guideAlbedo = make_float3(0.0f, 0.0f, 0.0f);
     float3 guideNormal = make_float3(0.0f, 0.0f, 0.0f);
+    unsigned int lobe = 0;
     int medium = -1;
     float lastPdf = 0.0f;
     float3 lastOrigin = origin;
     bool lastDelta = true;
     bool primaryChain = true;
+    bool guidePending = true;
 
     for (unsigned int depth = 0; depth < params.maxDepth; ++depth) {
         Hit hit = trace(origin, direction);
         if (!hit.found) {
             const float pdf = lastDelta ? 0.0f : environmentPdf(direction);
             const float weight = lastDelta ? 1.0f : powerHeuristic(lastPdf, pdf);
-            radiance += throughput * environment(direction) * weight;
+            radiance[lobe] += throughput * environment(direction) * weight;
             break;
         }
 
         const GpuMaterial material = textured(params.materials[hit.material], hit);
         hit.normal = mappedNormal(hit, material);
-        if (depth == 0) {
-            guideAlbedo = rgb(material.baseColor);
-            guideNormal = hit.normal;
+        const float3 view = -direction;
+        if (depth == 0U) {
+            // Classify the pixel once, from the surface the camera actually sees.
+            // Drawing the lobe per sample instead would scatter a pixel's energy
+            // across layers and leave each one far noisier than the beauty pass.
+            lobe = material.transmission > 0.5f ? 2U
+                 : material.metallic > 0.5f ? 1U : 0U;
+            // The denoiser wants camera space, and taking the normal from the
+            // primary hit is what gives it the silhouettes to stop blurring at.
+            guideNormal = make_float3(dot(hit.normal, params.lensU),
+                                      dot(hit.normal, params.lensV),
+                                      dot(hit.normal, params.cameraW));
+        }
+        if (guidePending) {
+            const bool clearGlass =
+                material.transmission > 0.95f && material.roughness < 0.1f;
+            if (!clearGlass) {
+                if (material.transmission < 0.05f)
+                    guideAlbedo = rgb(material.baseColor);
+                guidePending = false;
+            }
         }
         if (medium >= 0)
             throughput *= absorption(params.materials[medium], hit.distance);
         const float lightPdf = lastDelta ? 0.0f : emissivePdf(lastOrigin, hit);
         const float emissionWeight = lastDelta ? 1.0f
             : powerHeuristic(lastPdf, lightPdf);
-        radiance += throughput * material.emissive *
-                    (material.emissiveStrength * emissionWeight);
-        radiance += throughput * directLighting(hit, material, rng);
+        radiance[lobe] += throughput * material.emissive *
+                          (material.emissiveStrength * emissionWeight);
+        radiance[lobe] += throughput * directLighting(hit, material, view, rng);
         if (primaryChain)
-            radiance += throughput * causticLighting(hit, material);
+            radiance[lobe] += throughput * causticLighting(hit, material);
 
         const bool transmissive = material.transmission > 0.0f &&
                                   random(rng) < material.transmission;
@@ -837,41 +937,66 @@ extern "C" __global__ void __raygen__render() {
                                     : make_float3(0.0f, 0.0f, 3.0f);
             }
 
-            float3 microNormal = ggxNormal(hit.normal, material.roughness, rng);
-            if (dot(-direction, microNormal) < 0.0f)
-                microNormal = -microNormal;
+            const float alpha = roughnessAlpha(material.roughness);
+            const float3 microNormal = ggxNormal(view, hit.normal, alpha, rng);
             const float eta = hit.frontFace ? 1.0f / ior : ior;
-            const float cosine = fminf(dot(-direction, microNormal), 1.0f);
+            const float cosine = fminf(fmaxf(dot(view, microNormal), 0.0f), 1.0f);
             float3 transmitted;
-            const bool totalReflection = !refract(direction, microNormal, eta, transmitted);
-            if (totalReflection || random(rng) < fresnel(cosine, ior)) {
+            const bool totalReflection =
+                !refract(direction, microNormal, eta, transmitted);
+
+            // Schlick is only valid on the dense side of the interface, so when
+            // the ray is leaving the glass the transmitted angle is the one to
+            // feed it.
+            float reflectance = 1.0f;
+            if (!totalReflection) {
+                transmitted = normalize(transmitted);
+                reflectance = fresnel(
+                    eta > 1.0f ? fabsf(dot(transmitted, microNormal)) : cosine, ior);
+            }
+
+            const float viewCosine = fabsf(dot(view, hit.normal));
+            if (totalReflection || random(rng) < reflectance) {
                 direction = reflect(direction, microNormal);
+                if (dot(direction, hit.normal) <= 0.0f)
+                    break;
                 origin = hit.position + hit.normal * 0.001f;
             } else {
-                direction = normalize(transmitted);
+                direction = transmitted;
                 origin = hit.position - hit.normal * 0.001f;
                 medium = hit.frontFace ? static_cast<int>(hit.material) : -1;
             }
+            throughput *= maskingRatio(viewCosine,
+                                       fabsf(dot(direction, hit.normal)), alpha);
         } else {
             const float3 color = rgb(material.baseColor);
-            const float3 f0 = make_float3(
-                0.04f + (color.x - 0.04f) * material.metallic,
-                0.04f + (color.y - 0.04f) * material.metallic,
-                0.04f + (color.z - 0.04f) * material.metallic);
-            const float probability = fminf(fmaxf(maximum(f0), 0.05f), 0.95f);
+            const float3 f0 = baseReflectance(material);
+            const float viewCosine = fmaxf(dot(view, hit.normal), 0.0f);
+            const float probability =
+                specularProbability(material, view, hit.normal);
             if (random(rng) < probability) {
                 lastDelta = true;
-                const float3 microNormal = ggxNormal(hit.normal, material.roughness, rng);
+                const float alpha = roughnessAlpha(material.roughness);
+                const float3 microNormal = ggxNormal(view, hit.normal, alpha, rng);
                 direction = reflect(direction, microNormal);
-                if (dot(direction, hit.normal) <= 0.0f)
-                    direction = reflect(direction, hit.normal);
-                throughput *= f0 / probability;
+                const float lightCosine = dot(direction, hit.normal);
+                if (lightCosine <= 0.0f)
+                    break;
+                // Fresnel at the microfacet, not at normal incidence: this is
+                // what makes grazing angles approach a mirror instead of a flat
+                // four percent.
+                throughput *= schlick(f0, fmaxf(dot(view, microNormal), 0.0f)) *
+                    (maskingRatio(viewCosine, lightCosine, alpha) / probability);
             } else {
                 lastDelta = false;
                 primaryChain = false;
                 direction = cosineDirection(hit.normal, rng);
-                throughput *= color * ((1.0f - material.metallic) /
-                                        (1.0f - probability));
+                const float3 reflectance = schlick(f0, viewCosine);
+                const float3 diffuse =
+                    make_float3(1.0f - reflectance.x, 1.0f - reflectance.y,
+                                1.0f - reflectance.z);
+                throughput *= color * diffuse * ((1.0f - material.metallic) /
+                                                 (1.0f - probability));
                 lastPdf = (1.0f - material.transmission) *
                           (1.0f - probability) *
                           fmaxf(dot(hit.normal, direction), 0.0f) / 3.14159265f;
@@ -890,13 +1015,25 @@ extern "C" __global__ void __raygen__render() {
 
     const float4 previous = params.accumulation[index];
     const float weight = 1.0f / static_cast<float>(params.sample + 1U);
-    const float3 accumulated = rgb(previous) + (radiance - rgb(previous)) * weight;
+    const float3 sample = radiance[0] + radiance[1] + radiance[2];
+    const float3 accumulated = rgb(previous) + (sample - rgb(previous)) * weight;
     const float3 albedo = rgb(params.albedoGuide[index]) +
         (guideAlbedo - rgb(params.albedoGuide[index])) * weight;
     const float3 normal = rgb(params.normalGuide[index]) +
         (guideNormal - rgb(params.normalGuide[index])) * weight;
     params.accumulation[index] =
         make_float4(accumulated.x, accumulated.y, accumulated.z, 1.0f);
+    const float3 diffuse = rgb(params.diffuse[index]) +
+        (radiance[0] - rgb(params.diffuse[index])) * weight;
+    const float3 reflection = rgb(params.reflection[index]) +
+        (radiance[1] - rgb(params.reflection[index])) * weight;
+    const float3 refraction = rgb(params.refraction[index]) +
+        (radiance[2] - rgb(params.refraction[index])) * weight;
+    params.diffuse[index] = make_float4(diffuse.x, diffuse.y, diffuse.z, 1.0f);
+    params.reflection[index] =
+        make_float4(reflection.x, reflection.y, reflection.z, 1.0f);
+    params.refraction[index] =
+        make_float4(refraction.x, refraction.y, refraction.z, 1.0f);
     params.albedoGuide[index] = make_float4(albedo.x, albedo.y, albedo.z, 1.0f);
     params.normalGuide[index] = make_float4(normal.x, normal.y, normal.z, 1.0f);
     const float3 mapped = aces(accumulated * exp2f(params.exposure));

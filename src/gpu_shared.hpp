@@ -95,16 +95,24 @@ struct Photon {
 struct LaunchParams {
     uchar4* output;
     float4* accumulation;
+    float4* diffuse;
+    float4* reflection;
+    float4* refraction;
     float4* albedoGuide;
     float4* normalGuide;
     const float4* display;
+    const float4* display2;
+    const float4* display3;
+    float4* composite;
     const GpuMaterial* materials;
     const GpuTexture* textures;
     const GpuLight* lights;
     const float4* environment;
     const float* environmentCdf;
     Photon* photons;
-    unsigned int* photonBuckets;
+    unsigned int* photonCount;
+    const Photon* sortedPhotons;
+    const unsigned int* photonCellStart;
     OptixTraversableHandle scene;
     float3 eye;
     float3 cameraU;
@@ -130,8 +138,9 @@ struct LaunchParams {
     unsigned int sample;
     unsigned int maxDepth;
     unsigned int photonBucketCount;
-    unsigned int photonBucketSize;
+    unsigned int photonCapacity;
     unsigned int photonEmissions;
+    unsigned int photonPass;
 };
 
 }

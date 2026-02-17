@@ -75,6 +75,7 @@ add_executable(raytracer
     src/display.cpp
     src/image.cpp
     src/main.cpp
+    src/photon_grid.cu
     src/renderer.cpp
     src/scene.cpp
     src/stb.cpp
@@ -83,7 +84,7 @@ add_executable(raytracer
 set_source_files_properties(src/tinyexr.cpp PROPERTIES COMPILE_OPTIONS -w)
 target_compile_features(raytracer PRIVATE cxx_std_20)
 target_compile_options(raytracer PRIVATE
-    $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall;-Wextra;-Wpedantic>
+    $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:GNU,Clang>>:-Wall;-Wextra;-Wpedantic>
 )
 target_include_directories(raytracer PRIVATE
     "${optix_SOURCE_DIR}/include"
@@ -103,4 +104,5 @@ target_link_libraries(raytracer PRIVATE
 
 set_target_properties(raytracer PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+    CUDA_ARCHITECTURES 75
 )
