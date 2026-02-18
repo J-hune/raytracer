@@ -15,7 +15,7 @@ namespace {
 struct Options {
     std::filesystem::path scene;
     std::optional<std::filesystem::path> output;
-    rt::Profile profile = rt::Profile::Preview;
+    rt::Profile profile = rt::Profile::Final;
     std::uint32_t samples = 32;
     bool profileSet = false;
     bool samplesSet = false;
@@ -119,11 +119,7 @@ int main(int argc, char** argv) {
 
         rt::Display display(width, height);
         auto camera = scene.cameras.front();
-        bool finalRendering = arguments.profile == rt::Profile::Final;
-        bool finalReady = false;
-        std::string status = finalRendering ? "final rendering" : "preview";
-        const auto finalSamples =
-            arguments.samplesSet ? arguments.samples : 256U;
+        std::string status = "accumulating";
         const auto capture = std::filesystem::path("renders") /
                              arguments.scene.stem();
         auto capturePng = capture;
@@ -132,38 +128,25 @@ int main(int argc, char** argv) {
         captureExr += ".exr";
         while (display.open()) {
             if (display.update(camera)) {
-                renderer.setProfile(rt::Profile::Preview);
                 renderer.setCamera(camera);
-                finalRendering = false;
-                finalReady = false;
-                status = "preview";
-            }
-            if (display.finalRequested()) {
-                renderer.setProfile(rt::Profile::Final);
-                finalRendering = true;
-                finalReady = false;
-                status = "final rendering";
+                status = "accumulating";
             }
 
             auto* output = display.map();
-            if (finalReady)
-                renderer.copyOutput(output);
-            else
-                renderer.render(output);
-            display.present(renderer.samples(), status);
-
-            if (finalRendering && renderer.samples() >= finalSamples) {
+            renderer.render(output);
+            if (display.finalRequested()) {
                 renderer.denoise();
+                renderer.copyOutput(output);
                 std::filesystem::create_directories(capture.parent_path());
                 rt::writePng(capturePng, width, height, renderer.pixels());
                 rt::writeExr(captureExr, width, height, renderer.linearPixels());
                 std::cout << "Wrote " << capturePng << " and " << captureExr
-                          << " at "
-                          << renderer.samples() << " spp\n";
-                finalRendering = false;
-                finalReady = true;
-                status = "final saved";
+                          << " at " << renderer.samples() << " spp\n";
+                status = "captured";
+            } else {
+                status = "accumulating";
             }
+            display.present(renderer.samples(), status);
         }
     } catch (const std::exception& error) {
         std::cerr << "error: " << error.what() << '\n';

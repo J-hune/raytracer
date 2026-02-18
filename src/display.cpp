@@ -227,7 +227,7 @@ void Display::present(std::uint32_t samples, std::string_view status) {
 
     const auto title = "Raytracer | " + std::string(status) + " | " +
         std::to_string(samples) +
-        " spp | RMB look  WASD/ZQSD move  wheel speed  F final";
+        " spp | RMB look  WASD/ZQSD move  wheel speed  F capture";
     glfwSetWindowTitle(window_, title.c_str());
     glfwSwapBuffers(window_);
     if (glfwGetKey(window_, GLFW_KEY_ESCAPE) == GLFW_PRESS)
