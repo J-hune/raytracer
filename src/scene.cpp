@@ -20,6 +20,13 @@ constexpr std::uint32_t Unlit = 1U << 1U;
 constexpr std::uint32_t AlphaMask = 1U << 2U;
 constexpr std::uint32_t AlphaBlend = 1U << 3U;
 
+// glTF stores punctual light intensity in photometric units: candela for point
+// and spot lights, lux for directional ones. Emissive materials and the HDRI are
+// radiometric, so the two only share a scale once the luminous efficacy Blender
+// folds in on export (its default SPEC lighting mode) is divided back out.
+// Scenes exported in RAW mode should override this with 1.
+constexpr float LuminousEfficacy = 683.0f;
+
 struct CameraExtras {
     float aperture = 0.0f;
     float focusDistance = 10.0f;
@@ -31,6 +38,7 @@ struct Extras {
     float rotation = 0.0f;
     float strength = 1.0f;
     float exposure = 0.0f;
+    float luminousEfficacy = LuminousEfficacy;
 };
 
 void parseExtras(simdjson::dom::object* extras, std::size_t index,
@@ -62,6 +70,10 @@ void parseExtras(simdjson::dom::object* extras, std::size_t index,
         state.strength = static_cast<float>(value);
     if ((*extras)["raytracer_exposure"].get_double().get(value) == simdjson::SUCCESS)
         state.exposure = static_cast<float>(value);
+    if ((*extras)["raytracer_luminous_efficacy"].get_double().get(value) ==
+            simdjson::SUCCESS &&
+        value > 0.0)
+        state.luminousEfficacy = static_cast<float>(value);
 }
 
 Vec2 vec2(const fastgltf::math::nvec2& value) {
@@ -277,12 +289,13 @@ Camera camera(const fastgltf::Camera& source, const fastgltf::math::fmat4x4& tra
     return result;
 }
 
-Light light(const fastgltf::Light& source, const fastgltf::math::fmat4x4& transform) {
+Light light(const fastgltf::Light& source, const fastgltf::math::fmat4x4& transform,
+            float luminousEfficacy) {
     return {
         std::string(source.name),
         mat4(transform),
         vec3(source.color),
-        source.intensity,
+        source.intensity / luminousEfficacy,
         source.range.value_or(std::numeric_limits<float>::infinity()),
         source.innerConeAngle.value_or(0.0f),
         source.outerConeAngle.value_or(0.7853982f),
@@ -386,7 +399,8 @@ Scene loadScene(const std::filesystem::path& path) {
                 scene.cameras.push_back(camera(asset.cameras[index], transform, values));
             }
             if (node.lightIndex)
-                scene.lights.push_back(light(asset.lights[*node.lightIndex], transform));
+                scene.lights.push_back(light(asset.lights[*node.lightIndex], transform,
+                                             extras.luminousEfficacy));
         });
     return scene;
 }
