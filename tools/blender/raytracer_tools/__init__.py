@@ -1,10 +1,16 @@
+import json
 import os
+import struct
 from pathlib import Path
 
 import bpy
 from bpy.props import FloatProperty, PointerProperty, StringProperty
 from bpy.types import Operator, Panel, PropertyGroup
 from mathutils import Vector
+
+GLB_MAGIC = 0x46546C67
+CHUNK_JSON = 0x4E4F534A
+CHUNK_BIN = 0x004E4942
 
 
 def scene_get(key, default):
@@ -58,6 +64,90 @@ class RTSettings(PropertyGroup):
         set=camera_set("raytracer_focus_distance"))
 
 
+def volume_of(material):
+    """Reads KHR_materials_volume straight off a Volume Absorption node.
+
+    Blender only emits the extension when it finds a 'glTF Material Output'
+    group node, and since 5.2 that lookup runs against an inlined copy of the
+    node tree in which the group no longer exists, so it never fires. Reading
+    the absorption node ourselves is version proof.
+    """
+    tree = material.node_tree
+    if not tree:
+        return None
+    output = next((n for n in tree.nodes if n.type == "OUTPUT_MATERIAL"), None)
+    if output is None or not output.inputs["Volume"].is_linked:
+        return None
+    node = output.inputs["Volume"].links[0].from_node
+    if node.type != "VOLUME_ABSORPTION":
+        return None
+
+    thickness = 1.0
+    for group in tree.nodes:
+        if (group.type == "GROUP" and group.node_tree and
+                group.node_tree.name.lower().startswith("gltf material output")):
+            socket = group.inputs.get("Thickness")
+            if socket is not None:
+                thickness = socket.default_value
+    if thickness == 0.0:
+        return None
+
+    density = node.inputs["Density"].default_value
+    volume = {
+        "attenuationColor": list(node.inputs["Color"].default_value)[:3],
+        "thicknessFactor": thickness,
+    }
+    if density:
+        volume["attenuationDistance"] = 1.0 / density
+    return volume
+
+
+def patch_volumes(path):
+    """Injects KHR_materials_volume into an exported .glb. Returns the names
+    of the materials that were patched."""
+    blob = Path(path).read_bytes()
+    if len(blob) < 12 or struct.unpack("<I", blob[:4])[0] != GLB_MAGIC:
+        return []
+
+    offset, chunks = 12, []
+    while offset < len(blob):
+        length, kind = struct.unpack("<II", blob[offset:offset + 8])
+        chunks.append([kind, blob[offset + 8:offset + 8 + length]])
+        offset += 8 + length + (-length % 4)
+
+    document = next((c for c in chunks if c[0] == CHUNK_JSON), None)
+    if document is None:
+        return []
+    gltf = json.loads(document[1])
+
+    patched = []
+    for entry in gltf.get("materials", []):
+        material = bpy.data.materials.get(entry.get("name", ""))
+        volume = volume_of(material) if material else None
+        if not volume:
+            continue
+        entry.setdefault("extensions", {})["KHR_materials_volume"] = volume
+        # A volume needs a closed surface, so the spec forbids double sided.
+        entry["doubleSided"] = False
+        patched.append(entry["name"])
+
+    if not patched:
+        return []
+    used = gltf.setdefault("extensionsUsed", [])
+    if "KHR_materials_volume" not in used:
+        used.append("KHR_materials_volume")
+    document[1] = json.dumps(gltf, separators=(",", ":")).encode()
+
+    out = b""
+    for kind, data in chunks:
+        pad = b" " if kind == CHUNK_JSON else b"\0"
+        data = data + pad * (-len(data) % 4)
+        out += struct.pack("<II", len(data), kind) + data
+    Path(path).write_bytes(
+        struct.pack("<III", GLB_MAGIC, 2, 12 + len(out)) + out)
+    return patched
+
+
 def target(context):
     obj = context.active_object
     if not obj:
@@ -79,7 +169,12 @@ class RT_OT_focus_selected(Operator):
 
     def execute(self, context):
         camera = context.scene.camera
-        distance = (target(context) - camera.matrix_world.translation).length
+        matrix = camera.matrix_world
+        # Both Blender and the renderer put the focal plane perpendicular to the
+        # view axis, so the distance has to be measured along it. Using the
+        # euclidean distance focuses past an off-axis subject.
+        forward = matrix.to_quaternion() @ Vector((0.0, 0.0, -1.0))
+        distance = (target(context) - matrix.translation).dot(forward)
         context.scene.raytracer_tools.focus_distance = distance
         camera.data.dof.focus_distance = distance
         return {"FINISHED"}
@@ -131,7 +226,11 @@ class RT_OT_export(Operator):
         bpy.ops.export_scene.gltf(
             filepath=str(path), export_format="GLB", export_cameras=True,
             export_lights=True, export_extras=True, export_apply=True)
-        self.report({"INFO"}, f"Exported {path.name}")
+        patched = patch_volumes(path)
+        message = f"Exported {path.name}"
+        if patched:
+            message += f" (volume: {', '.join(patched)})"
+        self.report({"INFO"}, message)
         return {"FINISHED"}
 
 
