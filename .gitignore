@@ -38,6 +38,7 @@ src/*.o
 .DS_Store
 Thumbs.db
 *.blend1
+*.deb
 __pycache__/
 
 # Ignore rendered images
