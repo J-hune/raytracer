@@ -3,14 +3,99 @@
 #include "renderer.hpp"
 #include "scene.hpp"
 
+#include <algorithm>
+#include <chrono>
 #include <charconv>
 #include <exception>
 #include <filesystem>
+#include <iomanip>
 #include <iostream>
 #include <optional>
+#include <sstream>
 #include <string_view>
+#include <unistd.h>
 
 namespace {
+
+using Clock = std::chrono::steady_clock;
+
+double secondsSince(Clock::time_point start) {
+    return std::chrono::duration<double>(Clock::now() - start).count();
+}
+
+std::string duration(double seconds) {
+    const auto value = static_cast<std::uint64_t>(seconds);
+    std::ostringstream output;
+    if (value >= 3600)
+        output << value / 3600 << 'h' << std::setw(2) << std::setfill('0')
+               << value / 60 % 60 << 'm';
+    else if (value >= 60)
+        output << value / 60 << 'm' << std::setw(2) << std::setfill('0')
+               << value % 60 << 's';
+    else
+        output << value << 's';
+    return output.str();
+}
+
+class Progress {
+public:
+    explicit Progress(std::uint32_t total)
+        : total_(total), interactive_(isatty(STDOUT_FILENO)), start_(Clock::now()),
+          update_(start_) {
+        show(0);
+    }
+
+    void show(std::uint32_t current) {
+        const auto now = Clock::now();
+        const auto interval = interactive_ ? std::chrono::milliseconds(100)
+                                           : std::chrono::seconds(5);
+        if (current != total_ && current && now - update_ < interval)
+            return;
+        update_ = now;
+
+        const double elapsed = std::chrono::duration<double>(now - start_).count();
+        const double rate = current / std::max(elapsed, 1e-6);
+        const auto percent = 100U * current / total_;
+        std::ostringstream line;
+        line << "Rendering ";
+        if (interactive_) {
+            constexpr std::uint32_t width = 24;
+            const auto filled = width * current / total_;
+            line << '[' << std::string(filled, '#')
+                 << std::string(width - filled, '.') << "] ";
+        }
+        line << std::setw(3) << percent << "% | " << current << '/' << total_
+             << " spp | " << duration(elapsed);
+        if (current)
+            line << " | " << std::fixed << std::setprecision(2) << rate << " spp/s";
+        if (current && current != total_)
+            line << " | ETA " << duration((total_ - current) / rate);
+
+        if (interactive_)
+            std::cout << "\r\033[2K" << line.str() << std::flush;
+        else
+            std::cout << line.str() << '\n' << std::flush;
+    }
+
+    void finish() {
+        if (interactive_)
+            std::cout << '\n';
+    }
+
+private:
+    std::uint32_t total_;
+    bool interactive_;
+    Clock::time_point start_;
+    Clock::time_point update_;
+};
+
+template <typename Function>
+void phase(std::string_view label, Function&& function) {
+    std::cout << label << "..." << std::flush;
+    const auto start = Clock::now();
+    function();
+    std::cout << " done in " << duration(secondsSince(start)) << '\n';
+}
 
 struct Options {
     std::filesystem::path scene;
@@ -79,7 +164,12 @@ int main(int argc, char** argv) {
         constexpr std::uint32_t width = 1280;
         constexpr std::uint32_t height = 720;
         const auto arguments = options(argc, argv);
+        const auto loadStart = Clock::now();
+        if (arguments.output)
+            std::cout << "Loading " << arguments.scene << "..." << std::flush;
         const auto scene = rt::loadScene(arguments.scene);
+        if (arguments.output)
+            std::cout << " done in " << duration(secondsSince(loadStart)) << '\n';
         std::cout << "Loaded " << arguments.scene << '\n'
                   << "  " << scene.geometries.size() << " geometries, "
                   << scene.instances.size() << " instances\n"
@@ -99,21 +189,31 @@ int main(int argc, char** argv) {
         const char* profile =
             arguments.profile == rt::Profile::Final ? "final" : "preview";
         std::cout << "  profile " << profile << '\n';
+        const auto initializeStart = Clock::now();
+        if (arguments.output)
+            std::cout << "Initializing renderer..." << std::flush;
         rt::Renderer renderer(scene, width, height, arguments.profile);
+        if (arguments.output)
+            std::cout << " done in " << duration(secondsSince(initializeStart)) << '\n';
         if (arguments.output) {
-            while (renderer.samples() < arguments.samples)
+            Progress progress(arguments.samples);
+            while (renderer.samples() < arguments.samples) {
                 renderer.render();
+                progress.show(renderer.samples());
+            }
+            progress.finish();
             if (arguments.profile == rt::Profile::Final && arguments.denoise)
-                renderer.denoise();
-            if (arguments.output->extension() == ".exr")
-                rt::writeExr(*arguments.output, width, height,
-                             renderer.linearPixels());
-            else if (arguments.output->extension() == ".png")
-                rt::writePng(*arguments.output, width, height, renderer.pixels());
-            else
-                throw std::runtime_error("Output must use .png or .exr");
-            std::cout << "Wrote " << *arguments.output << " at "
-                      << renderer.samples() << " spp\n";
+                phase("Denoising with OptiX", [&] { renderer.denoise(); });
+            phase("Writing " + arguments.output->string(), [&] {
+                if (arguments.output->extension() == ".exr")
+                    rt::writeExr(*arguments.output, width, height,
+                                 renderer.linearPixels());
+                else if (arguments.output->extension() == ".png")
+                    rt::writePng(*arguments.output, width, height, renderer.pixels());
+                else
+                    throw std::runtime_error("Output must use .png or .exr");
+            });
+            std::cout << "Done at " << renderer.samples() << " spp\n";
             return 0;
         }
 
