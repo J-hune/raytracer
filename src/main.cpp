@@ -101,17 +101,30 @@ struct Options {
     std::filesystem::path scene;
     std::optional<std::filesystem::path> output;
     rt::Profile profile = rt::Profile::Final;
+    std::uint32_t width = 1280;
+    std::uint32_t height = 720;
     std::uint32_t samples = 32;
     bool profileSet = false;
     bool samplesSet = false;
     bool denoise = true;
 };
 
+std::uint32_t positiveInteger(std::string_view value, std::string_view name) {
+    std::uint32_t result = 0;
+    const auto parsed =
+        std::from_chars(value.data(), value.data() + value.size(), result);
+    if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size() ||
+        result == 0)
+        throw std::runtime_error("Invalid " + std::string(name));
+    return result;
+}
+
 Options options(int argc, char** argv) {
     if (argc < 2)
         throw std::runtime_error(
             "usage: raytracer <scene.gltf|scene.glb> [--profile preview|final] "
-            "[--output image.png] [--samples count] [--denoise on|off]");
+            "[--width pixels] [--height pixels] [--samples count] "
+            "[--denoise on|off] [--output image.png]");
 
     Options result;
     result.scene = argv[1];
@@ -130,13 +143,12 @@ Options options(int argc, char** argv) {
             else
                 throw std::runtime_error("Expected preview or final profile");
             result.profileSet = true;
+        } else if (name == "--width") {
+            result.width = positiveInteger(argv[index + 1], "width");
+        } else if (name == "--height") {
+            result.height = positiveInteger(argv[index + 1], "height");
         } else if (name == "--samples") {
-            const std::string_view value = argv[index + 1];
-            const auto parsed = std::from_chars(value.data(), value.data() + value.size(),
-                                                result.samples);
-            if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size() ||
-                result.samples == 0)
-                throw std::runtime_error("Invalid sample count");
+            result.samples = positiveInteger(argv[index + 1], "sample count");
             result.samplesSet = true;
         } else if (name == "--denoise") {
             const std::string_view value = argv[index + 1];
@@ -161,9 +173,9 @@ Options options(int argc, char** argv) {
 
 int main(int argc, char** argv) {
     try {
-        constexpr std::uint32_t width = 1280;
-        constexpr std::uint32_t height = 720;
         const auto arguments = options(argc, argv);
+        const auto width = arguments.width;
+        const auto height = arguments.height;
         const auto loadStart = Clock::now();
         if (arguments.output)
             std::cout << "Loading " << arguments.scene << "..." << std::flush;
@@ -188,7 +200,8 @@ int main(int argc, char** argv) {
 
         const char* profile =
             arguments.profile == rt::Profile::Final ? "final" : "preview";
-        std::cout << "  profile " << profile << '\n';
+        std::cout << "  profile " << profile << ", " << width << 'x' << height
+                  << '\n';
         const auto initializeStart = Clock::now();
         if (arguments.output)
             std::cout << "Initializing renderer..." << std::flush;
