@@ -6,8 +6,10 @@ application only loads, displays and renders the exported scene.
 Geometry traversal, path integration, temporal accumulation and tone mapping
 run on the GPU through CUDA and OptiX. The display buffer is shared directly
 with OpenGL, without copying rendered pixels through the CPU. Final renders
-add a GPU photon map for transmitted caustics and guide OptiX denoising with
-the accumulated albedo and world-space normal buffers.
+add a GPU photon map for transmitted and reflected caustics. OptiX denoises the
+diffuse, reflection and refraction layers, guided by the accumulated albedo and
+camera-space normals; the caustic layer is composited untouched, since filtering
+it costs more detail than it removes noise.
 
 ## Scene format
 
@@ -81,9 +83,10 @@ pinned revisions.
 
 ## Scenes
 
-- `studio_validation.glb` exercises every supported material and texture path;
-- `glass_gallery.glb` is a dense glass, brass and ceramic composition;
-- `bubble_study.glb` focuses on transparent forms, depth of field and caustics.
+- `sphere_field.glb` exercises glass, depth of field and temporal accumulation;
+- `dragon_cornell.glb` combines colored glass and indirect lighting;
+- `gothic_reliquary.glb` and `optics_lab.glb` are the artistic showcases;
+- `caustic_lab.glb` focuses on sharp transmitted and reflected caustics.
 
 Each GLB is paired with its editable Blender source.
 
