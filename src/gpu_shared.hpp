@@ -98,6 +98,7 @@ struct LaunchParams {
     float4* diffuse;
     float4* reflection;
     float4* refraction;
+    float4* caustics;
     float4* albedoGuide;
     float4* normalGuide;
     const float4* display;

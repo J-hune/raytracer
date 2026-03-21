@@ -233,9 +233,7 @@ static __forceinline__ __device__ float random(unsigned int& state) {
 }
 
 static __forceinline__ __device__ float3 sky(float3 direction) {
-    const float t = 0.5f * (direction.y + 1.0f);
-    return make_float3(0.03f, 0.04f, 0.06f) * (1.0f - t) +
-           make_float3(0.35f, 0.48f, 0.70f) * t;
+    return make_float3(0.1f, 0.1f, 0.1f);
 }
 
 static __forceinline__ __device__ float2 environmentUv(float3 direction) {
@@ -731,12 +729,22 @@ static __forceinline__ __device__ float3 causticLighting(
     const int3 center = photonCell(hit.position, params.photonRadius);
     const float radiusSquared = params.photonRadius * params.photonRadius;
     float3 flux = make_float3(0.0f, 0.0f, 0.0f);
+    // Two of the 27 cells can hash to the same bucket, and a bucket is read
+    // whole, so without this the photons it holds would be accumulated twice.
+    unsigned int visited[27];
+    unsigned int visitedCount = 0;
     for (int z = -1; z <= 1; ++z) {
         for (int y = -1; y <= 1; ++y) {
             for (int x = -1; x <= 1; ++x) {
                 const unsigned int bucket = photonBucket(
                     make_int3(center.x + x, center.y + y, center.z + z),
                     params.photonBucketCount);
+                bool seen = false;
+                for (unsigned int i = 0; i < visitedCount; ++i)
+                    seen |= visited[i] == bucket;
+                if (seen)
+                    continue;
+                visited[visitedCount++] = bucket;
                 const unsigned int end = params.photonCellStart[bucket + 1U];
                 for (unsigned int index = params.photonCellStart[bucket];
                      index < end; ++index) {
@@ -831,6 +839,23 @@ extern "C" __global__ void __raygen__photons() {
             specularPath = true;
             continue;
         }
+
+        if (material.metallic > 0.5f && material.roughness < 0.3f) {
+            const float3 view = -direction;
+            const float alpha = roughnessAlpha(material.roughness);
+            const float3 microNormal = ggxNormal(view, hit.normal, alpha, rng);
+            const float3 reflected = reflect(direction, microNormal);
+            const float lightCosine = dot(reflected, hit.normal);
+            if (lightCosine <= 0.0f)
+                return;
+            power *= schlick(baseReflectance(material),
+                             fmaxf(dot(view, microNormal), 0.0f)) *
+                     maskingRatio(fabsf(dot(view, hit.normal)), lightCosine, alpha);
+            direction = reflected;
+            origin = hit.position + hit.normal * 0.001f;
+            specularPath = true;
+            continue;
+        }
         return;
     }
 }
@@ -844,6 +869,7 @@ extern "C" __global__ void __raygen__render() {
             color += rgb(params.display2[index]);
         if (params.display3)
             color += rgb(params.display3[index]);
+        color += rgb(params.caustics[index]);
         if (params.composite)
             params.composite[index] = make_float4(color.x, color.y, color.z, 1.0f);
         const float3 mapped = aces(color * exp2f(params.exposure));
@@ -868,6 +894,7 @@ extern "C" __global__ void __raygen__render() {
     float3 direction = normalize(focalPoint - origin);
     float3 throughput = make_float3(1.0f, 1.0f, 1.0f);
     float3 radiance[3] = {};
+    float3 causticRadiance = make_float3(0.0f, 0.0f, 0.0f);
     float3 guideAlbedo = make_float3(0.0f, 0.0f, 0.0f);
     float3 guideNormal = make_float3(0.0f, 0.0f, 0.0f);
     unsigned int lobe = 0;
@@ -920,7 +947,7 @@ extern "C" __global__ void __raygen__render() {
                           (material.emissiveStrength * emissionWeight);
         radiance[lobe] += throughput * directLighting(hit, material, view, rng);
         if (primaryChain)
-            radiance[lobe] += throughput * causticLighting(hit, material);
+            causticRadiance += throughput * causticLighting(hit, material);
 
         const bool transmissive = material.transmission > 0.0f &&
                                   random(rng) < material.transmission;
@@ -1015,7 +1042,7 @@ extern "C" __global__ void __raygen__render() {
 
     const float4 previous = params.accumulation[index];
     const float weight = 1.0f / static_cast<float>(params.sample + 1U);
-    const float3 sample = radiance[0] + radiance[1] + radiance[2];
+    const float3 sample = radiance[0] + radiance[1] + radiance[2] + causticRadiance;
     const float3 accumulated = rgb(previous) + (sample - rgb(previous)) * weight;
     const float3 albedo = rgb(params.albedoGuide[index]) +
         (guideAlbedo - rgb(params.albedoGuide[index])) * weight;
@@ -1034,6 +1061,10 @@ extern "C" __global__ void __raygen__render() {
         make_float4(reflection.x, reflection.y, reflection.z, 1.0f);
     params.refraction[index] =
         make_float4(refraction.x, refraction.y, refraction.z, 1.0f);
+    const float3 caustics = rgb(params.caustics[index]) +
+        (causticRadiance - rgb(params.caustics[index])) * weight;
+    params.caustics[index] =
+        make_float4(caustics.x, caustics.y, caustics.z, 1.0f);
     params.albedoGuide[index] = make_float4(albedo.x, albedo.y, albedo.z, 1.0f);
     params.normalGuide[index] = make_float4(normal.x, normal.y, normal.z, 1.0f);
     const float3 mapped = aces(accumulated * exp2f(params.exposure));

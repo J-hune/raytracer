@@ -10,6 +10,7 @@
 #include <stb_image.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <array>
 #include <climits>
 #include <cmath>
@@ -166,10 +167,10 @@ float luminance(float3 value) {
     return 0.2126f * value.x + 0.7152f * value.y + 0.0722f * value.z;
 }
 
-// Gather radius as a fraction of the scene radius. The grid stores every photon
-// it is given, so this can stay tight enough to keep caustic detail; widening it
-// trades sharpness for lower variance.
-constexpr float CausticRadiusFactor = 0.0025f;
+// Gather footprint in pixels, held constant across resolutions. Tightening it
+// past this starts showing salt and pepper in the dim tails of a caustic;
+// widening it costs definition in the fine arcs without buying anything back.
+constexpr float CausticRadiusPixels = 1.0f;
 
 // Camera samples between two photon map builds. Each build reseeds, so the
 // running average over samples also averages over independent photon maps.
@@ -243,12 +244,13 @@ struct Renderer::Impl {
         diffuse.resize(accumulation.size());
         reflection.resize(accumulation.size());
         refraction.resize(accumulation.size());
+        caustics.resize(accumulation.size());
         albedoGuide.resize(accumulation.size());
         normalGuide.resize(accumulation.size());
         output.resize(static_cast<std::size_t>(width) * height * sizeof(uchar4));
+        causticsEnabled = profile == Profile::Final;
         configureCamera(scene.cameras.front());
         reset();
-        launch.photonRadius = profile == Profile::Final ? causticRadius : 0.0f;
     }
 
     void uploadMaterials(const Scene& scene) {
@@ -524,10 +526,13 @@ struct Renderer::Impl {
             (minimum.y + maximum.y) * 0.5f,
             (minimum.z + maximum.z) * 0.5f);
         launch.sceneRadius = length(difference(maximum, minimum)) * 0.525f;
-        causticRadius = std::max(launch.sceneRadius * CausticRadiusFactor, 0.002f);
-        launch.photonBucketCount = 1U << 20U;
-        launch.photonCapacity = 1U << 21U;
-        launch.photonEmissions = 1U << 21U;
+        // Only about a tenth of the emitted photons survive to a diffuse hit, so
+        // emissions can run far ahead of the capacity. Density is what buys both
+        // sharpness and quiet: it is what lets the gather radius come down
+        // without the estimate falling apart.
+        launch.photonBucketCount = 1U << 22U;
+        launch.photonCapacity = 1U << 23U;
+        launch.photonEmissions = 1U << 24U;
 
         const auto counterBytes =
             static_cast<std::size_t>(launch.photonBucketCount + 1U) *
@@ -684,12 +689,22 @@ struct Renderer::Impl {
         launch.lensV = up;
         launch.aperture = camera.aperture;
         launch.focusDistance = camera.focusDistance;
+        const float depth = std::clamp(camera.focusDistance, camera.nearPlane,
+                                       launch.sceneRadius * 2.0f);
+        // Against the render height, not a fixed reference: a world radius that
+        // ignores resolution covers twice the pixels at 4K, which is why the
+        // caustic reconstructed at 1080p turned to mush when the frame grew.
+        causticRadius = std::max(
+            2.0f * CausticRadiusPixels * depth * scale /
+                static_cast<float>(height),
+            0.0005f);
         launch.width = width;
         launch.height = height;
         launch.accumulation = static_cast<float4*>(accumulation.data());
         launch.diffuse = static_cast<float4*>(diffuse.data());
         launch.reflection = static_cast<float4*>(reflection.data());
         launch.refraction = static_cast<float4*>(refraction.data());
+        launch.caustics = static_cast<float4*>(caustics.data());
         launch.albedoGuide = static_cast<float4*>(albedoGuide.data());
         launch.normalGuide = static_cast<float4*>(normalGuide.data());
         launch.materials = reinterpret_cast<const GpuMaterial*>(materials.device());
@@ -703,8 +718,11 @@ struct Renderer::Impl {
         cudaCheck(cudaMemset(diffuse.data(), 0, diffuse.size()));
         cudaCheck(cudaMemset(reflection.data(), 0, reflection.size()));
         cudaCheck(cudaMemset(refraction.data(), 0, refraction.size()));
+        cudaCheck(cudaMemset(caustics.data(), 0, caustics.size()));
         cudaCheck(cudaMemset(albedoGuide.data(), 0, albedoGuide.size()));
         cudaCheck(cudaMemset(normalGuide.data(), 0, normalGuide.size()));
+        launch.photonPass = 0;
+        launch.photonRadius = causticsEnabled ? causticRadius : 0.0f;
         sample = 0;
         denoisedReady = false;
     }
@@ -716,11 +734,12 @@ struct Renderer::Impl {
 
     void setProfile(Profile profile) {
         launch.maxDepth = profile == Profile::Final ? 32U : 5U;
-        launch.photonRadius = profile == Profile::Final ? causticRadius : 0.0f;
+        causticsEnabled = profile == Profile::Final;
         reset();
     }
 
     void buildCaustics() {
+        launch.photonRadius = causticRadius;
         cudaCheck(cudaMemset(photonCounter.data(), 0, photonCounter.size()));
         cudaCheck(cudaMemcpy(parameters.data(), &launch, sizeof(launch),
                              cudaMemcpyHostToDevice));
@@ -738,9 +757,18 @@ struct Renderer::Impl {
         std::uint32_t stored = 0;
         cudaCheck(cudaMemcpy(&stored, photonCounter.data(), sizeof(stored),
                              cudaMemcpyDeviceToHost));
+        // Overflow drops photons without a word and only shows up as a caustic
+        // that quietly dims, so it is worth one line of warning.
+        if (stored > launch.photonCapacity && !photonOverflowWarned) {
+            photonOverflowWarned = true;
+            std::fprintf(stderr,
+                         "warning: photon buffer full (%u of %u stored); "
+                         "the caustic will be darker than it should be\n",
+                         stored, launch.photonCapacity);
+        }
         stored = std::min(stored, launch.photonCapacity);
         cudaCheck(buildPhotonGrid(
-            static_cast<const Photon*>(photons.data()), stored, causticRadius,
+            static_cast<const Photon*>(photons.data()), stored, launch.photonRadius,
             launch.photonBucketCount,
             static_cast<std::uint32_t*>(photonCellCounts.data()),
             static_cast<std::uint32_t*>(photonCellStart.data()), photonScan.data(),
@@ -791,7 +819,10 @@ struct Renderer::Impl {
             denoiserScratch.resize(std::max(
                 sizes.withoutOverlapScratchSizeInBytes,
                 sizes.computeAverageColorSizeInBytes));
-            denoised.resize(accumulation.size());
+            // The AOV model requires a beauty layer, but the composite is built
+            // from the denoised AOVs and this output is never read, so it lands
+            // in a buffer the display pass overwrites anyway. At 4K that is one
+            // full float4 image saved.
             denoisedDiffuse.resize(accumulation.size());
             denoisedReflection.resize(accumulation.size());
             denoisedRefraction.resize(accumulation.size());
@@ -816,7 +847,7 @@ struct Renderer::Impl {
         guides.normal = image(normalGuide.device());
         std::array<OptixDenoiserLayer, 4> layers{};
         layers[0].input = input;
-        layers[0].output = image(denoised.device());
+        layers[0].output = image(denoisedComposite.device());
         layers[0].type = OPTIX_DENOISER_AOV_TYPE_BEAUTY;
         layers[1].input = image(diffuse.device());
         layers[1].output = image(denoisedDiffuse.device());
@@ -893,10 +924,10 @@ struct Renderer::Impl {
     Buffer diffuse;
     Buffer reflection;
     Buffer refraction;
+    Buffer caustics;
     Buffer albedoGuide;
     Buffer normalGuide;
     Buffer output;
-    Buffer denoised;
     Buffer denoisedDiffuse;
     Buffer denoisedReflection;
     Buffer denoisedRefraction;
@@ -918,7 +949,9 @@ struct Renderer::Impl {
     LaunchParams launch{};
     float environmentPower = 0.0f;
     float causticRadius = 0.0f;
+    bool causticsEnabled = false;
     bool denoisedReady = false;
+    bool photonOverflowWarned = false;
 };
 
 Renderer::Renderer(const Scene& scene, std::uint32_t width, std::uint32_t height,
