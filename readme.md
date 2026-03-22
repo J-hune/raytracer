@@ -83,12 +83,18 @@ pinned revisions.
 
 ## Scenes
 
-- `sphere_field.glb` exercises glass, depth of field and temporal accumulation;
-- `dragon_cornell.glb` combines colored glass and indirect lighting;
-- `gothic_reliquary.glb` and `optics_lab.glb` are the artistic showcases;
-- `caustic_lab.glb` focuses on sharp transmitted and reflected caustics.
+The showcase scenes are not tracked here. Their GLB exports and Blender sources
+run to several hundred megabytes, which is more than this repository is worth
+carrying, so `scenes/` and the Poly Haven models under `assets/models/` are
+ignored. The renders below come from them:
 
-Each GLB is paired with its editable Blender source.
+- `sphere_field` exercises glass, depth of field and temporal accumulation;
+- `dragon_cornell` combines colored glass and indirect lighting;
+- `gothic_reliquary` and `optics_lab` are the artistic showcases;
+- `caustic_lab` focuses on sharp transmitted and reflected caustics.
+
+Any glTF 2.0 file works: point the renderer at your own export, or rebuild one
+from Blender with the add-on in `tools/blender`.
 
 ![Glass gallery](img/github/glass_gallery.png)
 
