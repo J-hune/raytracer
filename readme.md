@@ -1,57 +1,40 @@
-# Raytracer
+# Path tracer GPU en CUDA / OptiX
 
-GPU path tracer built around glTF 2.0 scenes. Blender is the authoring tool; the
-application only loads, displays and renders the exported scene.
+Moteur de rendu physiquement réaliste, entièrement sur GPU. Les scènes sont créées dans Blender et exportées en glTF 2.0 ; l'application les charge, les affiche et les rend.
 
-Geometry traversal, path integration, temporal accumulation and tone mapping
-run on the GPU through CUDA and OptiX. The display buffer is shared directly
-with OpenGL, without copying rendered pixels through the CPU. Final renders
-add a GPU photon map for transmitted and reflected caustics. OptiX denoises the
-diffuse, reflection and refraction layers, guided by the accumulated albedo and
-camera-space normals; the caustic layer is composited untouched, since filtering
-it costs more detail than it removes noise.
+[![Caustic lab](img/github/caustic_lab.jpg)](img/github/caustic_lab_4k.jpg)
+[![Gothic reliquary](img/github/gothic_reliquary.jpg)](img/github/gothic_reliquary_4k.jpg)
+[![Dragon cornell](img/github/dragon_cornell.jpg)](img/github/dragon_cornell_4k.jpg)
+[![Sphere field](img/github/sphere_field.jpg)](img/github/sphere_field_4k.jpg)
 
-## Scene format
+## Techniques
 
-Only `.gltf` and `.glb` are supported. The loader preserves:
+- **Rendu**
+  - path tracing progressif sur OptiX 9, accumulation temporelle ;
+  - roulette russe ;
+  - tampon d'affichage partagé avec OpenGL.
+- **Matériaux**
+  - metallic-roughness glTF ;
+  - microfacettes GGX échantillonnées sur les normales visibles, Fresnel de Schlick, masquage de Smith ;
+  - textures de couleur, rugosité, normales, émission ;
+  - transmission, réflexion totale interne, indice de réfraction, dispersion ;
+  - absorption volumique de Beer-Lambert.
+- **Éclairage**
+  - lumières ponctuelles, géométrie émissive, environnements HDRI ;
+  - échantillonnage par importance des sources et de l'environnement ;
+  - échantillonnage par importance multiple, heuristique de puissance ;
+  - caustiques par photon mapping, grille de hachage GPU, estimation de densité.
+- **Image**
+  - débruitage OptiX guidé par albédo et normales, sur couches diffuse, réflexion et réfraction ;
+  - profondeur de champ ;
+  - tone mapping ACES ;
+  - export PNG et EXR.
 
-- indexed triangle meshes, smooth normals, tangents and UVs;
-- shared meshes as instances instead of duplicating geometry;
-- metallic-roughness materials, normal maps, UV0/UV1 and texture transforms;
-- transmission, IOR, dispersion, volume attenuation and emissive strength;
-- perspective cameras and punctual lights;
-- `raytracer_aperture` and `raytracer_focus_distance` camera extras.
+## Dépendances
 
-In Blender, export glTF 2.0 with cameras, punctual lights, materials and custom
-properties enabled. Prefer GLB for self-contained scenes.
+CMake 3.24+, un compilateur C++20, le CUDA Toolkit 12+, un GPU NVIDIA Turing ou plus récent avec un pilote R570+, ainsi que les paquets de développement GLFW 3.4, OpenGL, libpng et zlib. fastgltf `v0.9.0`, OptiX `v9.0.0`, TinyEXR `v1.0.13` et stb sont récupérés automatiquement à la configuration, à des révisions figées : une connexion réseau est nécessaire au premier `cmake`.
 
-HDRI settings live in the Blender scene custom properties:
-
-- `raytracer_hdri`: path relative to the exported glTF file;
-- `raytracer_hdri_rotation`: rotation in radians;
-- `raytracer_hdri_strength`: lighting multiplier;
-- `raytracer_exposure`: display exposure in stops.
-
-For colored absorption, add Blender's `glTF Material Output` node to the
-material and set a non-zero thickness. This exports standard
-`KHR_materials_volume`; the renderer does not use a private material format.
-
-The optional Blender extension in
-`tools/blender/raytracer_tools` exposes these settings in the 3D View sidebar.
-It can aim the active camera at the selected object, set its focus distance and
-export the current scene as GLB. Blender remains the scene editor; the viewer
-does not duplicate its placement or material UI.
-
-## Build
-
-Requirements:
-
-- CMake 3.24 or newer;
-- a C++20 compiler;
-- CUDA Toolkit 12 or newer;
-- an NVIDIA Turing-or-newer GPU with an R570-or-newer driver;
-- GLFW 3.4, OpenGL, libpng and zlib development packages;
-- Git and an internet connection during the first configure.
+## Usage
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -59,52 +42,20 @@ cmake --build build -j
 ./build/bin/raytracer scene.glb
 ```
 
-The window accumulates one sample per pixel and frame:
+La fenêtre accumule un échantillon par pixel et par image. Clic droit maintenu pour regarder autour, `WASD` ou `ZQSD` plus `E` et `C` pour se déplacer, molette pour la vitesse, `Shift` pour accélérer, `F` pour un rendu final à 256 échantillons avec débruitage et export dans `renders/`, `Échap` pour quitter.
 
-- hold right mouse to look around;
-- use `WASD` or `ZQSD`, `E` and `C` to move;
-- use the wheel to change movement speed and Shift to accelerate;
-- press `F` for a 256 spp final render, OptiX denoising and PNG + EXR export;
-- press Escape to close.
-
-The final files are written to `renders/<scene>.png` and `.exr`. Offline
-renders use the same profiles:
+En mode hors ligne, le profil `final` active le photon mapping et une profondeur de 32 rebonds ; `preview` s'arrête à 5.
 
 ```sh
 ./build/bin/raytracer scene.glb --output render.png
 ./build/bin/raytracer scene.glb --profile final --samples 1024 --output render.exr
-./build/bin/raytracer scene.glb --profile final --samples 256 --denoise off \
-    --output raw.png
+./build/bin/raytracer scene.glb --profile final --width 3840 --height 2160 --denoise off --output brut.png
 ```
 
-The PNG is denoised and tone mapped. The EXR keeps denoised scene-linear HDR
-values. fastgltf `v0.9.0`, OptiX `v9.0.0`, stb and TinyEXR are fetched at
-pinned revisions.
+Le PNG est débruité et tone mappé, l'EXR conserve les valeurs HDR en linéaire scène.
 
-## Scenes
+Les scènes vitrines ne sont pas versionnées ici : leurs exports GLB et sources Blender pèsent plusieurs centaines de mégaoctets. N'importe quel fichier glTF 2.0 fonctionne. L'extension Blender de `tools/blender/raytracer_tools` expose dans la barre latérale de la vue 3D les réglages propres au moteur (HDRI, exposition, ouverture, distance de mise au point), vise la caméra active sur l'objet sélectionné et exporte la scène en GLB.
 
-The showcase scenes are not tracked here. Their GLB exports and Blender sources
-run to several hundred megabytes, which is more than this repository is worth
-carrying, so `scenes/` and the Poly Haven models under `assets/models/` are
-ignored. The renders below come from them:
+## Licence
 
-- `sphere_field` exercises glass, depth of field and temporal accumulation;
-- `dragon_cornell` combines colored glass and indirect lighting;
-- `gothic_reliquary` and `optics_lab` are the artistic showcases;
-- `caustic_lab` focuses on sharp transmitted and reflected caustics.
-
-Any glTF 2.0 file works: point the renderer at your own export, or rebuild one
-from Blender with the add-on in `tools/blender`.
-
-![Glass gallery](img/github/glass_gallery.png)
-
-![Bubble study](img/github/bubble_study.png)
-
-## Previous renders
-
-Images produced by the original CPU renderer remain in [`img/github`](img/github).
-The CPU renderer, OFF importer and legacy PPM assets have been removed.
-
-## License
-
-MIT. See [`LICENSE`](LICENSE).
+MIT. Voir [`LICENSE`](LICENSE).
